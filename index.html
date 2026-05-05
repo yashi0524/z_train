@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>通風管逃脫 v3.1</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+  <script src="assets_v2.4.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:'Courier New',monospace;}
+    #game-wrapper{position:relative;display:inline-block;}
+
+    /* The oblique illusion: squish the phaser canvas vertically + rotate slightly */
+    /* We wrap it so the outer box keeps original size for fog/minimap overlay */
+    #iso-shell{
+      display:block;
+      transform: scaleY(0.6) rotateX(0deg);
+      transform-origin: top center;
+      position:relative;
+      z-index:1;
+    }
+    /* Fog and minimap sit OUTSIDE iso-shell so they're not squished */
+    #fog-canvas{position:absolute;top:0;left:0;pointer-events:none;z-index:3;}
+    #minimap-canvas{position:absolute;bottom:10px;left:10px;pointer-events:none;z-index:5;
+      border:2px solid rgba(255,255,255,0.3);border-radius:4px;box-shadow:0 0 10px rgba(0,0,0,0.5);}
+
+    #hud{width:800px;display:flex;justify-content:space-between;align-items:center;
+      padding:8px 12px;background:#0d0d1a;border:2px solid #333;border-bottom:none;
+      color:#ccc;font-size:12px;letter-spacing:.08em;}
+    #hud span{color:#50c878;}
+    #status-msg{color:#888;font-size:11px;transition:color .3s;}
+    #status-msg.hiding{color:#7ec8e3;}
+    #btn-row{position:absolute;top:8px;left:10px;z-index:60;display:flex;gap:8px;}
+    .game-btn{color:#fff;border:none;border-radius:6px;padding:6px 12px;
+      font-family:'Courier New',monospace;font-size:13px;cursor:pointer;
+      box-shadow:0 2px 6px rgba(0,0,0,.4);transition:background .15s;}
+    #reset-btn{background:#c0392b;} #reset-btn:hover{background:#e74c3c;}
+    #start-btn{background:#27ae60;} #start-btn:hover{background:#2ecc71;}
+    #start-btn:disabled{background:#555;cursor:default;}
+    #clock-box{display:flex;flex-direction:column;align-items:center;background:#0d0d1a;
+      border:2px solid #444;border-radius:8px;padding:3px 10px;min-width:100px;
+      font-family:'Courier New',monospace;transition:border-color .3s,background .3s;}
+    #clock-box.red{border-color:#e63946;background:#1a0a0a;}
+    #clock-box.green{border-color:#50c878;background:#0a1a0f;}
+    #clock-box.grey{border-color:#444;background:#111;}
+    #clock-phase{font-size:9px;letter-spacing:.1em;color:#777;}
+    #clock-box.red #clock-phase{color:#e63946;}
+    #clock-box.green #clock-phase{color:#50c878;}
+    #clock-time{font-size:15px;font-weight:bold;letter-spacing:.08em;color:#aaa;}
+    #clock-box.red #clock-time{color:#e63946;}
+    #clock-box.green #clock-time{color:#50c878;}
+    #zombie-count{font-size:10px;color:#7dab6e;}
+    #item-hud{position:absolute;bottom:10px;right:10px;z-index:6;
+      display:flex;flex-direction:row;align-items:flex-end;gap:12px;padding:10px 14px;
+      background:rgba(0,0,0,0.55);border-radius:12px;
+      border:1.5px solid rgba(255,255,255,0.15);pointer-events:none;}
+    .item-slot{width:52px;height:52px;border-radius:8px;background:rgba(255,255,255,0.06);
+      border:1.5px solid rgba(255,255,255,0.18);display:flex;align-items:center;
+      justify-content:center;font-size:26px;position:relative;}
+    .item-slot.has-item{border-color:rgba(255,220,80,0.6);background:rgba(255,220,80,0.08);}
+    .item-slot.empty{opacity:0.3;}
+    .item-slot .badge{position:absolute;bottom:-4px;right:-4px;background:#e63946;color:#fff;
+      font-size:9px;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;
+      justify-content:center;font-family:monospace;font-weight:bold;border:1px solid #fff;}
+    .item-label{font-size:9px;color:rgba(255,255,255,0.5);font-family:'Courier New',monospace;
+      letter-spacing:.05em;margin-top:2px;text-align:center;}
+  </style>
+
+  <!--
+  ═══════════════════════════════════════════════
+  通風管逃脫 — 版本更新說明
+  ═══════════════════════════════════════════════
+  v3.1 (2025)  跨平台相容版
+    - 修正 Safari/Edge 效能問題：paintFog 改用固定
+      offscreen dimCanvas，不再每幀 createElement
+    - 加入 X-UA-Compatible、color-scheme meta 標籤
+    - 修正視野邊界：世界邊界線段加 1px inset
+    - 物理引擎 fps 提升至 240，牆體碰撞加 tileBias
+    - 玩家/敵人加 setMaxVelocity 防穿牆
+    - 視野半徑從 160 增加到 200
+
+  v3.0  視野與穿牆修正
+    - 可視範圍邊界線段修正（1px inset）
+    - 物理 fps 提升至 240 + tileBias:32
+    - 牆體碰撞箱在薄方向各加 4px
+    - VISION_RADIUS 200
+
+  v2.9  三個 Bug 修正
+    - 重置後按鈕不再消失（排除 #btn-row）
+    - 跳躍結束後貓咪不再變扁（36×60 補償）
+    - 被抓/勝利遮罩內建重置按鈕，pointer-events:auto
+
+  v2.8  視覺/介面調整
+    - 貓咪/殭屍/物件高度補償 CSS scaleY(0.6)
+    - 按鈕移出 iso-shell，不再被壓扁
+    - 小地圖移至左下角
+    - 道具欄移至右下角，橫向排列
+
+  v2.7  可視範圍中心修正
+    - fogY() 將世界 Y 乘以 ISO_SCALE 再繪製
+    - exploredCanvas 高度縮減為 MAP_H×ISO_SCALE
+    - 視野暈圈半徑同步乘以 ISO_SCALE
+
+  v2.6  斜角視角 + 跳躍閃避
+    - CSS scaleY(0.6) 實現 45° 俯視斜角
+    - 跳躍用 ghost sprite 方案，物理 body 不動
+    - 跳躍期間暫時移除殭屍碰撞 overlap
+
+  v2.5  ISO 投影修正（全部重寫）
+    - 物理和相機統一在 ISO 空間運作
+    - 修正 v2.4 isoContainer 方案的相機追蹤失敗
+
+  v2.4  斜角視角首次嘗試（isoContainer 方案）
+
+  v2.3  手槍 + 跳躍 + 道具欄
+    - 空白鍵跳躍、F 鍵躲櫃子
+    - 手槍 1 發子彈，左鍵射擊擊退殭屍
+    - 右側道具欄（手槍/鑰匙）
+
+  v2.2  地圖 2 倍、出口隨機邊緣、鑰匙提示強化
+
+  v2.1  修正貓咪只能在左上角移動
+    - 加入 physics.world.setBounds(MAP_W, MAP_H)
+
+  v2.0  大地圖 + 相機捲動 + 小地圖
+    - 地圖 1600×1120（2 倍視窗）
+    - WASD 移動觸發相機捲動（邊緣 200px）
+    - 右上角小地圖即時顯示貓咪位置
+    - assets.js 獨立貼圖檔案
+
+  v1.x  基礎遊戲功能
+    - 貓咪/殭屍/通風管/火車/鑰匙/出口
+    - 追捕期/安全期循環
+    - 戰爭迷霧 + 射線視野
+    - 隨機地圖生成
+  ═══════════════════════════════════════════════
+  -->
+</head>
+<body>
+<div id="hud">
+  <div>通風管逃脫 <span>v3.1</span></div>
+  <div id="status-msg">等待開始</div>
+  <div>WASD移動 · 空白跳躍 · F躲櫃子 · 左鍵射擊</div>
+  <div id="clock-box" class="grey">
+    <div id="clock-phase">待機中</div>
+    <div id="clock-time">00:05</div>
+    <div id="zombie-count">🧟 ×1</div>
+  </div>
+</div>
+<div id="game-wrapper">
+  <div id="item-hud">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div class="item-slot empty" id="slot-gun">🔫</div>
+      <div class="item-label">手槍</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div class="item-slot empty" id="slot-key">🔑</div>
+      <div class="item-label">鑰匙</div>
+    </div>
+  </div>
+  <!-- iso-shell: Phaser canvas gets CSS scaleY to look oblique -->
+  <div id="iso-shell">
+    <div id="game-container"></div>
+  </div>
+  <!-- Buttons outside iso-shell so they're not squished -->
+  <div id="btn-row">
+    <button class="game-btn" id="reset-btn" onclick="resetGame()">🔄 重置</button>
+    <button class="game-btn" id="start-btn" onclick="startGame()">▶ 開始</button>
+  </div>
+  <!-- fog and minimap outside iso-shell so they render at full height -->
+  <canvas id="fog-canvas" width="800" height="560"></canvas>
+  <canvas id="minimap-canvas" width="160" height="112"></canvas>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// Constants — pure top-down physics, CSS handles oblique look
+// ═══════════════════════════════════════════
+const VIEW_W=800, VIEW_H=560;
+const ISO_SCALE=0.6;  // must match CSS scaleY on #iso-shell
+const MAP_W=1600, MAP_H=1120;
+const SCROLL_MARGIN=200;
+const PLAYER_SPEED=220, ENEMY_SPEED=110;
+const VISION_RADIUS=200;
+const CABINET_RADIUS=22;
+const FIRST_SAFE=5, SAFE_DURATION=30, HUNT_DURATION=15, COUNTDOWN_SECS=5;
+const CABINET_HIDE_MAX=5;
+const MAX_TRAIN_CARS=5;
+const TILE=40;
+const TRAIN_X=10, TRAIN_Y=10;
+const CAR_W=108, CAR_H=52, CAR_GAP=4, LOCO_W=62;
+function doorX(i){ return TRAIN_X+8+i*(CAR_W+CAR_GAP)+CAR_W-22; }
+const DOOR_Y=TRAIN_Y+10;
+const MM_W=160, MM_H=112;
+const MM_SX=MM_W/MAP_W, MM_SY=MM_H/MAP_H;
+
+// ── Fog of War ─────────────────────────────
+const fogCanvas=document.getElementById('fog-canvas');
+const fogCtx=fogCanvas.getContext('2d');
+const exploredCanvas=document.createElement('canvas');
+exploredCanvas.width=MAP_W; exploredCanvas.height=MAP_H*ISO_SCALE;
+const exploredCtx=exploredCanvas.getContext('2d');
+exploredCtx.fillStyle='#000'; exploredCtx.fillRect(0,0,MAP_W,MAP_H*ISO_SCALE);
+// Persistent offscreen canvas for dim-memory layer (avoids per-frame allocation)
+const dimCanvas=document.createElement('canvas');
+dimCanvas.width=VIEW_W; dimCanvas.height=VIEW_H;
+const dimCtx=dimCanvas.getContext('2d');
+let _camX=0,_camY=0;
+
+// sy = world y → fog-canvas y (apply ISO_SCALE to compensate CSS scaleY)
+function fogY(worldY){ return worldY * ISO_SCALE; }
+// camY in fog-canvas space
+function fogCamY(){ return _camY * ISO_SCALE; }
+
+function paintFog(px,py,vpts){
+  const fcamY=fogCamY();
+
+  // Paint explored region (persistent white mask)
+  if(vpts&&vpts.length>=3){
+    exploredCtx.save();
+    exploredCtx.fillStyle='#fff';
+    exploredCtx.beginPath();
+    exploredCtx.moveTo(vpts[0].x, fogY(vpts[0].y));
+    for(let i=1;i<vpts.length;i++) exploredCtx.lineTo(vpts[i].x, fogY(vpts[i].y));
+    exploredCtx.closePath();
+    exploredCtx.fill();
+    exploredCtx.restore();
+  }
+
+  // Step 1: full black fog
+  fogCtx.globalAlpha=1;
+  fogCtx.fillStyle='#000';
+  fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
+
+  // Step 2: reveal explored areas (punch holes = destination-out)
+  fogCtx.save();
+  fogCtx.globalCompositeOperation='destination-out';
+  fogCtx.drawImage(exploredCanvas,_camX,fcamY,VIEW_W,VIEW_H,0,0,VIEW_W,VIEW_H);
+  fogCtx.restore();
+
+  if(vpts&&vpts.length>=3){
+    // Step 3: re-darken explored-but-not-visible using persistent dimCanvas
+    dimCtx.clearRect(0,0,VIEW_W,VIEW_H);
+    // Draw explored region into dimCanvas
+    dimCtx.drawImage(exploredCanvas,_camX,fcamY,VIEW_W,VIEW_H,0,0,VIEW_W,VIEW_H);
+    // Multiply with dark colour using source-in
+    dimCtx.save();
+    dimCtx.globalCompositeOperation='source-in';
+    dimCtx.fillStyle='rgba(0,0,0,0.72)';
+    dimCtx.fillRect(0,0,VIEW_W,VIEW_H);
+    dimCtx.restore();
+    // Cut out current vision polygon
+    dimCtx.save();
+    dimCtx.globalCompositeOperation='destination-out';
+    dimCtx.beginPath();
+    dimCtx.moveTo(vpts[0].x-_camX, fogY(vpts[0].y)-fcamY);
+    for(let i=1;i<vpts.length;i++) dimCtx.lineTo(vpts[i].x-_camX, fogY(vpts[i].y)-fcamY);
+    dimCtx.closePath();
+    dimCtx.fill();
+    dimCtx.restore();
+    // Composite dimCanvas onto fog
+    fogCtx.drawImage(dimCanvas,0,0);
+
+    // Step 4: vignette at vision edge
+    const fpx=px-_camX, fpy=fogY(py)-fcamY;
+    const gr=fogCtx.createRadialGradient(
+      fpx,fpy,VISION_RADIUS*ISO_SCALE*0.8,
+      fpx,fpy,VISION_RADIUS*ISO_SCALE*1.25
+    );
+    gr.addColorStop(0,'rgba(0,0,0,0)');
+    gr.addColorStop(1,'rgba(0,0,0,0.4)');
+    fogCtx.fillStyle=gr;
+    fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
+  }
+}
+function resetFog(){
+  exploredCtx.fillStyle='#000'; exploredCtx.fillRect(0,0,MAP_W,MAP_H*ISO_SCALE);
+  dimCtx.clearRect(0,0,VIEW_W,VIEW_H);
+  fogCtx.fillStyle='#000'; fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
+}
+
+// ── Minimap ────────────────────────────────
+const mmCanvas=document.getElementById('minimap-canvas');
+const mmCtx=mmCanvas.getContext('2d');
+let _mmLevel=null;
+function paintMinimap(px,py){
+  if(!_mmLevel) return;
+  const {walls,pillars,cabinets,exit,key,keyCollected,exitLocked}=_mmLevel;
+  mmCtx.clearRect(0,0,MM_W,MM_H);
+  mmCtx.fillStyle='rgba(20,20,35,0.92)'; mmCtx.fillRect(0,0,MM_W,MM_H);
+  mmCtx.save(); mmCtx.globalAlpha=0.28;
+  mmCtx.drawImage(exploredCanvas,0,0,MAP_W,MAP_H*ISO_SCALE,0,0,MM_W,MM_H);
+  mmCtx.restore();
+  mmCtx.fillStyle='rgba(136,153,170,0.85)';
+  walls.forEach(w=>mmCtx.fillRect(w.x*MM_SX,w.y*MM_SY,Math.max(1,w.w*MM_SX),Math.max(1,w.h*MM_SY)));
+  pillars.forEach(p=>mmCtx.fillRect((p.x-p.s)*MM_SX,(p.y-p.s)*MM_SY,p.s*2*MM_SX,p.s*2*MM_SY));
+  mmCtx.fillStyle='rgba(160,121,42,0.7)';
+  cabinets.forEach(c=>mmCtx.fillRect((c.x-5)*MM_SX,(c.y-5)*MM_SY,10*MM_SX,10*MM_SY));
+  if(!keyCollected){mmCtx.fillStyle='#FFD700';mmCtx.beginPath();mmCtx.arc(key.x*MM_SX,key.y*MM_SY,2.5,0,Math.PI*2);mmCtx.fill();}
+  mmCtx.fillStyle=exitLocked?'#888':'#00ff88';
+  mmCtx.fillRect((exit.x-8)*MM_SX,(exit.y-8)*MM_SY,16*MM_SX,16*MM_SY);
+  mmCtx.fillStyle='#50c878';
+  mmCtx.beginPath(); mmCtx.arc(px*MM_SX,py*MM_SY,3.5,0,Math.PI*2); mmCtx.fill();
+  mmCtx.strokeStyle='#fff'; mmCtx.lineWidth=1; mmCtx.stroke();
+  mmCtx.strokeStyle='rgba(255,255,255,0.22)'; mmCtx.lineWidth=1;
+  mmCtx.strokeRect(_camX*MM_SX,_camY*MM_SY,VIEW_W*MM_SX,(VIEW_H/ISO_SCALE)*MM_SY);
+}
+
+// ── Ray-cast ───────────────────────────────
+function buildSegs(walls,pillars){
+  const s=[];
+  function r(x,y,w,h){s.push([x,y,x+w,y],[x+w,y,x+w,y+h],[x+w,y+h,x,y+h],[x,y+h,x,y]);}
+  walls.forEach(w=>r(w.x,w.y,w.w,w.h));
+  pillars.forEach(p=>r(p.x-p.s,p.y-p.s,p.s*2,p.s*2));
+  // World boundary — use 1px inset so rays always hit it before going OOB
+  const E=1;
+  r(-E,-E,MAP_W+E*2,MAP_H+E*2);
+  return s;
+}
+function castVision(px,py,segs,rad){
+  const angles=[];
+  segs.forEach(([x1,y1,x2,y2])=>{
+    [Math.atan2(y1-py,x1-px),Math.atan2(y2-py,x2-px)].forEach(a=>angles.push(a-.0001,a,a+.0001));
+  });
+  const pts=[];
+  angles.forEach(angle=>{
+    const dx=Math.cos(angle),dy=Math.sin(angle); let minT=rad;
+    segs.forEach(([x1,y1,x2,y2])=>{
+      const ex=x2-x1,ey=y2-y1,d=dx*ey-dy*ex; if(Math.abs(d)<1e-8) return;
+      const t=((x1-px)*ey-(y1-py)*ex)/d, u=((x1-px)*dy-(y1-py)*dx)/d;
+      if(t>=0&&t<minT&&u>=0&&u<=1) minT=t;
+    });
+    pts.push({angle,x:px+dx*minT,y:py+dy*minT});
+  });
+  pts.sort((a,b)=>a.angle-b.angle); return pts;
+}
+
+// ── Level generator ────────────────────────
+function generateLevel(){
+  const margin=3,cols=Math.floor(MAP_W/TILE),rows=Math.floor(MAP_H/TILE);
+  const walls=[],occ=new Set();
+  function addW(tx,ty,tw,th){
+    walls.push({x:tx*TILE,y:ty*TILE,w:tw*TILE,h:th*TILE});
+    for(let dx=0;dx<tw;dx++) for(let dy=0;dy<th;dy++) occ.add(`${tx+dx},${ty+dy}`);
+  }
+  [{cx:10,cy:7},{cx:28,cy:7},{cx:10,cy:18},{cx:28,cy:18},{cx:19,cy:12}].forEach(({cx,cy})=>{
+    const rw=7,rh=5,rx=cx-3,ry=cy-2;
+    if(rx<2||ry<3||rx+rw>cols-2||ry+rh>rows-2) return;
+    addW(rx,ry,3,1);addW(rx+4,ry,3,1);addW(rx,ry+rh-1,3,1);addW(rx+4,ry+rh-1,3,1);
+    addW(rx,ry,1,2);addW(rx,ry+3,1,2);addW(rx+rw-1,ry,1,2);addW(rx+rw-1,ry+3,1,2);
+  });
+  const ne=14+Math.floor(Math.random()*8);
+  for(let a=0;a<ne*12&&walls.length<ne+40;a++){
+    const h=Math.random()>.5,len=2+Math.floor(Math.random()*4);
+    const tx=margin+Math.floor(Math.random()*(cols-2*margin-len));
+    const ty=3+Math.floor(Math.random()*(rows-5));
+    let ok=true;
+    for(let i=0;i<len;i++){if(occ.has(h?`${tx+i},${ty}`:`${tx},${ty+i}`)){ok=false;break;}}
+    if(!ok) continue;
+    if(h) addW(tx,ty,len,1); else addW(tx,ty,1,len);
+  }
+  const pillars=[];
+  for(let a=0;a<200&&pillars.length<10;a++){
+    const tx=3+Math.floor(Math.random()*(cols-6)),ty=3+Math.floor(Math.random()*(rows-6));
+    if(!occ.has(`${tx},${ty}`)){occ.add(`${tx},${ty}`);pillars.push({x:tx*TILE+20,y:ty*TILE+20,s:12});}
+  }
+  const cabinets=[];
+  for(let a=0;a<300&&cabinets.length<7;a++){
+    const tx=2+Math.floor(Math.random()*(cols-4)),ty=3+Math.floor(Math.random()*(rows-5));
+    if(!occ.has(`${tx},${ty}`)){occ.add(`${tx},${ty}`);cabinets.push({x:tx*TILE+20,y:ty*TILE+20});}
+  }
+  const ep=Math.floor(Math.random()*4); let exit;
+  if(ep===0) exit={x:(8+Math.floor(Math.random()*(cols-12)))*TILE,y:TILE};
+  else if(ep===1) exit={x:(2+Math.floor(Math.random()*(cols-4)))*TILE,y:(rows-2)*TILE};
+  else if(ep===2) exit={x:TILE,y:(4+Math.floor(Math.random()*(rows-6)))*TILE};
+  else exit={x:(cols-2)*TILE,y:(2+Math.floor(Math.random()*(rows-4)))*TILE};
+  let key=null;
+  for(let a=0;a<300&&!key;a++){
+    const tx=2+Math.floor(Math.random()*(cols-4)),ty=3+Math.floor(Math.random()*(rows-5));
+    const kx=tx*TILE+20,ky=ty*TILE+20;
+    if(!occ.has(`${tx},${ty}`)&&Math.hypot(kx-exit.x,ky-exit.y)>350&&Math.hypot(kx-MAP_W/2,ky-MAP_H/2)>180){
+      occ.add(`${tx},${ty}`);key={x:kx,y:ky};
+    }
+  }
+  if(!key) key={x:400,y:900};
+  return {walls,pillars,cabinets,exit,key,keyCollected:false,exitLocked:true};
+}
+
+// ═══════════════════════════════════════════
+// Scene  — pure top-down physics, oblique look via CSS on #iso-shell
+// ═══════════════════════════════════════════
+class GameScene extends Phaser.Scene{
+  constructor(){super('GameScene');}
+
+  preload(){
+    this.textures.addCanvas('player',  drawCat(48));
+    this.textures.addCanvas('enemy',   drawZombie(48));
+    this.textures.addCanvas('cabinet', drawCabinet(44));
+    this.textures.addCanvas('key_tex', drawKeyTex(36));
+    this.textures.addCanvas('gun_tex', drawGun(32));
+    this.textures.addCanvas('exit_locked', drawExitTex(48,true));
+    this.textures.addCanvas('exit_open',   drawExitTex(48,false));
+  }
+
+  create(){
+    const lv=generateLevel();
+    this._lv=lv; _mmLevel=lv;
+    this._segs=buildSegs(lv.walls,lv.pillars);
+    resetFog();
+
+    this.physics.world.setBounds(0,0,MAP_W,MAP_H);
+    this.cameras.main.setBounds(0,0,MAP_W,MAP_H);
+    this.cameras.main.setScroll(MAP_W/2-VIEW_W/2, MAP_H/2-VIEW_H/2);
+
+    // ── Floor ──
+    const bg=this.add.graphics().setDepth(0);
+    for(let tx=0;tx<MAP_W/TILE;tx++) for(let ty=0;ty<MAP_H/TILE;ty++){
+      bg.fillStyle((tx+ty)%2===0?0xedf2ed:0xe3eae3,1);
+      bg.fillRect(tx*TILE,ty*TILE,TILE,TILE);
+    }
+    bg.lineStyle(1,0xd0d8d0,.5);
+    for(let x=0;x<=MAP_W;x+=TILE) bg.lineBetween(x,0,x,MAP_H);
+    for(let y=0;y<=MAP_H;y+=TILE) bg.lineBetween(0,y,MAP_W,y);
+
+    // ── Train ──
+    this._numCars=1;
+    this._tg=this.add.graphics().setDepth(1);
+    drawTrainGfx(this._tg,this._numCars,TRAIN_X,TRAIN_Y,CAR_W,CAR_H,CAR_GAP,LOCO_W);
+
+    // ── Walls (with 3D side drawn below top face) ──
+    this.walls=this.physics.add.staticGroup();
+    const wg=this.add.graphics().setDepth(2);
+    const SIDE=16;
+    lv.walls.forEach(w=>{
+      // dark side face
+      wg.fillStyle(0x3a4455,1); wg.fillRect(w.x,w.y+w.h,w.w,SIDE);
+      wg.lineStyle(1,0x556677,.4); wg.lineBetween(w.x,w.y+w.h+SIDE,w.x+w.w,w.y+w.h+SIDE);
+      // top face
+      wg.fillStyle(0x8899aa,1); wg.fillRect(w.x,w.y,w.w,w.h);
+      wg.fillStyle(0xbcccdd,.3); wg.fillRect(w.x+2,w.y+2,w.w-4,Math.min(6,w.h-4));
+      wg.lineStyle(5,0xaaccff,.1); wg.strokeRect(w.x-2,w.y-2,w.w+4,w.h+4);
+      wg.lineStyle(2,0xbbddff,.22); wg.strokeRect(w.x-1,w.y-1,w.w+2,w.h+2);
+      wg.lineStyle(1.5,0xddeeff,.6); wg.strokeRect(w.x,w.y,w.w,w.h);
+      // Slightly inflate collision box to prevent edge tunnelling
+      const bw=w.w<w.h ? w.w+4 : w.w;
+      const bh=w.w<w.h ? w.h : w.h+4;
+      const b=this.walls.create(w.x+w.w/2,w.y+w.h/2,null);
+      b.setVisible(false); b.body.setSize(bw,bh); b.refreshBody();
+    });
+    lv.pillars.forEach(p=>{
+      const sz=p.s*2;
+      wg.fillStyle(0x3a4455,1); wg.fillRect(p.x-p.s,p.y+p.s,sz,SIDE);
+      wg.fillStyle(0x667799,1); wg.fillRect(p.x-p.s,p.y-p.s,sz,sz);
+      wg.fillStyle(0x99aacc,.4); wg.fillRect(p.x-p.s+2,p.y-p.s+2,6,6);
+      wg.lineStyle(1.5,0xbbddff,.55); wg.strokeRect(p.x-p.s,p.y-p.s,sz,sz);
+      const b=this.walls.create(p.x,p.y,null);
+      b.setVisible(false); b.body.setSize(sz,sz); b.refreshBody();
+    });
+
+    // ── Cabinets ──
+    this._cabs=[];
+    const cg=this.physics.add.staticGroup();
+    lv.cabinets.forEach(c=>{
+      const sp=cg.create(c.x,c.y,'cabinet');
+      sp.setOrigin(0.5).setDisplaySize(44,73).setDepth(3);
+      sp.body.setSize(36,36); sp.refreshBody();
+      this._cabs.push({sprite:sp,x:c.x,y:c.y});
+    });
+
+    // ── Gun ──
+    this._hasGun=false; this._gunUsed=false;
+    const gi=Math.floor(Math.random()*this._cabs.length);
+    const gc=this._cabs[gi];
+    this._gunSpr=this.add.image(gc.x,gc.y-26,'gun_tex').setDisplaySize(28,23).setDepth(4).setAlpha(0.9);
+    this.tweens.add({targets:this._gunSpr,y:gc.y-30,yoyo:true,repeat:-1,duration:900,ease:'Sine.easeInOut'});
+    this._gunZone=new Phaser.Geom.Circle(gc.x,gc.y,CABINET_RADIUS+32);
+
+    // ── Key ──
+    this._hasKey=false;
+    this._keySpr=this.add.image(lv.key.x,lv.key.y,'key_tex').setDisplaySize(26,43).setDepth(3);
+    this.tweens.add({targets:this._keySpr,y:lv.key.y-6,yoyo:true,repeat:-1,duration:700,ease:'Sine.easeInOut'});
+    this._keyZone=new Phaser.Geom.Circle(lv.key.x,lv.key.y,26);
+
+    // ── Exit ──
+    this._exitLocked=true;
+    const ex=lv.exit;
+    this._exitSpr=this.add.image(ex.x,ex.y,'exit_locked').setDisplaySize(44,73).setDepth(3);
+    this.tweens.add({targets:this._exitSpr,scaleX:1.12,scaleY:1.12,yoyo:true,repeat:-1,duration:700});
+    this._exitZone=new Phaser.Geom.Circle(ex.x,ex.y,28);
+
+    // ── Player ──
+    this.player=this.physics.add.sprite(MAP_W/2,MAP_H/2,'player');
+    this.player.setDisplaySize(36,60).setCollideWorldBounds(true).setDepth(5);
+    this.player.body.setSize(20,20); this.player.body.setOffset(14,14);
+    this.player.body.setMaxVelocity(PLAYER_SPEED, PLAYER_SPEED);
+
+    // jump state (visual only, _jumpZ shifts sprite up via setOriginY trick)
+    this._jumpZ=0; this._jumpT=0; this._jumping=false;
+    this._shadow=this.add.graphics().setDepth(4);
+
+    // ── Enemies ──
+    this.enemies=this.physics.add.group();
+    this._zCount=1; this._spawnZ(0);
+
+    // ── HUD (screen-fixed) ──
+    this._hideBar=this.add.graphics().setDepth(20).setScrollFactor(0);
+    this._ejectTxt=this.add.text(0,0,'',{fontSize:'20px',fontFamily:'Courier New',color:'#e63946',stroke:'#fff',strokeThickness:4}).setOrigin(0.5).setDepth(20).setScrollFactor(0);
+    this.hint=this.add.text(VIEW_W/2,VIEW_H-18,'',{fontSize:'12px',fontFamily:'Courier New',color:'#fff',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(20).setScrollFactor(0);
+
+    // overlay div
+    this._ov=document.createElement('div');
+    this._ov.style.cssText='position:absolute;top:0;left:0;width:800px;height:560px;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:50;';
+    document.getElementById('game-wrapper').appendChild(this._ov);
+
+    // Input
+    this.keys=this.input.keyboard.addKeys({
+      up:Phaser.Input.Keyboard.KeyCodes.W, down:Phaser.Input.Keyboard.KeyCodes.S,
+      left:Phaser.Input.Keyboard.KeyCodes.A, right:Phaser.Input.Keyboard.KeyCodes.D,
+      space:Phaser.Input.Keyboard.KeyCodes.SPACE, f:Phaser.Input.Keyboard.KeyCodes.F,
+    });
+    this._spWas=false; this._fWas=false;
+    this.input.on('pointerdown',(p)=>{ if(p.leftButtonDown()) this._shoot(p); });
+
+    // Colliders
+    this.physics.add.collider(this.player,this.walls);
+    this.physics.add.collider(this.enemies,this.walls);
+    this._zOvlp=this.physics.add.overlap(this.player,this.enemies,this._caught_cb,null,this);
+
+    // State
+    this._state='waiting';
+    this._pt=0; this._firstSafe=true;
+    this._hiding=false; this._hideT=0; this._nearCab=null;
+    this._caught=false; this._won=false;
+    this._keyLbl=null; this._gunLbl=null;
+
+    this._showOv('🐱','按「開始」進入遊戲<br><br>找到 🔑 鑰匙 → 抵達 EXIT 出口即勝利<br>F鍵躲入櫃子（最多5秒）· 空白鍵跳躍可閃過殭屍');
+    this._hudUpdate();
+  }
+
+  // camera
+  _camUpdate(){
+    const px=this.player.x, py=this.player.y;
+    const cam=this.cameras.main;
+    let cx=cam.scrollX, cy=cam.scrollY;
+    const sx=px-cx, sy=py-cy;
+    if(sx<SCROLL_MARGIN)        cx=px-SCROLL_MARGIN;
+    if(sx>VIEW_W-SCROLL_MARGIN) cx=px-VIEW_W+SCROLL_MARGIN;
+    if(sy<SCROLL_MARGIN)        cy=py-SCROLL_MARGIN;
+    if(sy>VIEW_H-SCROLL_MARGIN) cy=py-VIEW_H+SCROLL_MARGIN;
+    cx=Math.max(0,Math.min(MAP_W-VIEW_W,cx));
+    cy=Math.max(0,Math.min(MAP_H-VIEW_H,cy));
+    cam.setScroll(cx,cy); _camX=cx; _camY=cy;
+  }
+
+  _showOv(e,m){
+    this._ov.innerHTML=`<div style="background:rgba(0,0,0,0.78);border-radius:16px;padding:28px 40px;text-align:center;color:#fff;font-family:'Courier New',monospace;max-width:480px;"><div style="font-size:60px;margin-bottom:10px;">${e}</div><div style="font-size:14px;line-height:1.9;">${m}</div></div>`;
+  }
+  _hideOv(){ this._ov.innerHTML=''; }
+
+  startGame(){
+    if(this._state!=='waiting') return;
+    document.getElementById('start-btn').disabled=true;
+    this._enterSafe();
+  }
+  _enterSafe(){
+    this._state='safe'; this._pt=this._firstSafe?FIRST_SAFE:SAFE_DURATION;
+    this._firstSafe=false; this._recallZ(); this._hideOv(); this._hudUpdate();
+  }
+  _enterPreHunt(){
+    this._state='pre_hunt'; this._pt=COUNTDOWN_SECS;
+    if(this._numCars<MAX_TRAIN_CARS){
+      this._numCars++; this._tg.clear();
+      drawTrainGfx(this._tg,this._numCars,TRAIN_X,TRAIN_Y,CAR_W,CAR_H,CAR_GAP,LOCO_W);
+    }
+    this._zCount++; this._spawnZ(this._numCars-1);
+    this.enemies.getChildren().forEach(z=>{z._ret=false;});
+    this._hudUpdate();
+  }
+  _enterHunt(){
+    this._state='hunt'; this._pt=HUNT_DURATION; this._hideOv(); this._hudUpdate();
+  }
+  _spawnZ(ci){
+    const z=this.enemies.create(doorX(Math.min(ci,this._numCars-1)),DOOR_Y+20,'enemy');
+    z.setDisplaySize(40,67).setCollideWorldBounds(true).setDepth(5);
+    z.body.setSize(18,18); z.body.setOffset(15,15);
+    z.body.setMaxVelocity(ENEMY_SPEED, ENEMY_SPEED);
+    z._ret=false; z._ci=ci; return z;
+  }
+  _recallZ(){
+    this.enemies.getChildren().forEach((z,i)=>{
+      z._ret=true;
+      z._hx=doorX(Math.min(z._ci||0,this._numCars-1));
+      z._hy=DOOR_Y+20+i*4;
+    });
+  }
+  _hudUpdate(){
+    const te=document.getElementById('clock-time');
+    const pe=document.getElementById('clock-phase');
+    const ce=document.getElementById('zombie-count');
+    const be=document.getElementById('clock-box');
+    if(!te) return;
+    ce.textContent='🧟 ×'+this._zCount;
+    const fmt=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+    if(this._state==='waiting'){be.className='grey';pe.textContent='待機中';te.textContent='00:05';}
+    else if(this._state==='safe'){be.className='green';pe.textContent='✓ 安全期';te.textContent=fmt(Math.max(0,Math.ceil(this._pt)));}
+    else if(this._state==='pre_hunt'){be.className='red';pe.textContent='⚠ 即將追捕';te.textContent='準備！';}
+    else if(this._state==='hunt'){be.className='red';pe.textContent='⚠ 追捕中';te.textContent=fmt(Math.max(0,Math.ceil(this._pt)));}
+    if(_mmLevel){_mmLevel.exitLocked=this._exitLocked;_mmLevel.keyCollected=this._hasKey;}
+  }
+  _itemHUD(){
+    const gs=document.getElementById('slot-gun'), ks=document.getElementById('slot-key');
+    if(!gs||!ks) return;
+    if(this._hasGun){
+      gs.classList.remove('empty'); gs.classList.add('has-item');
+      let b=gs.querySelector('.badge');
+      if(!b){b=document.createElement('div');b.className='badge';gs.appendChild(b);}
+      b.textContent=this._gunUsed?'0':'1'; b.style.background=this._gunUsed?'#555':'#e63946';
+    } else {gs.classList.add('empty');gs.classList.remove('has-item');}
+    if(this._hasKey){ks.classList.remove('empty');ks.classList.add('has-item');}
+    else {ks.classList.add('empty');ks.classList.remove('has-item');}
+  }
+  _caught_cb(){
+    if(this._hiding||this._caught||this._won||this._state!=='hunt') return;
+    this._caught=true; this.physics.pause();
+    this._showOv('😱','被抓了！<br><br><button onclick="resetGame()" style="margin-top:12px;padding:8px 20px;background:#c0392b;color:#fff;border:none;border-radius:8px;font-family:Courier New,monospace;font-size:15px;cursor:pointer;">🔄 重置重玩</button>');
+    this._ov.style.pointerEvents='auto';
+  }
+  _eject(){
+    this._hiding=false; this._hideT=0; this.player.setAlpha(1); this._hideBar.clear();
+    const sx=this.player.x-_camX, sy=this.player.y-_camY;
+    this._ejectTxt.setText('彈出！').setPosition(sx,sy-40);
+    this.time.delayedCall(800,()=>{if(this._ejectTxt)this._ejectTxt.setText('');});
+    document.getElementById('status-msg').textContent='暴露中';
+    document.getElementById('status-msg').className='';
+  }
+  _shoot(ptr){
+    if(!this._hasGun||this._gunUsed||this._hiding) return;
+    this._gunUsed=true; this._itemHUD();
+    const wx=ptr.x+_camX, wy=ptr.y+_camY;
+    const px=this.player.x, py=this.player.y;
+    const ang=Math.atan2(wy-py,wx-px), spd=700, dist=900;
+    const bul=this.add.graphics().setDepth(8);
+    bul.fillStyle(0xffee33,1); bul.fillCircle(0,0,5); bul.x=px; bul.y=py;
+    const fl=this.add.graphics().setDepth(9);
+    fl.fillStyle(0xffffff,1); fl.fillCircle(px,py,11);
+    this.time.delayedCall(55,()=>fl.destroy());
+    this.tweens.add({targets:bul,x:px+Math.cos(ang)*dist,y:py+Math.sin(ang)*dist,duration:(dist/spd)*1000,
+      onUpdate:()=>{
+        this.enemies.getChildren().forEach(z=>{
+          if(!z.active) return;
+          if(Phaser.Math.Distance.Between(bul.x,bul.y,z.x,z.y)<22){
+            z._ret=true; z._hx=doorX(Math.min(z._ci||0,this._numCars-1)); z._hy=DOOR_Y+20;
+            const h=this.add.text(z.x,z.y-18,'💥',{fontSize:'22px'}).setOrigin(0.5).setDepth(8);
+            this.tweens.add({targets:h,y:z.y-50,alpha:0,duration:700,onComplete:()=>h.destroy()});
+            if(bul.active) bul.destroy();
+          }
+        });
+      },
+      onComplete:()=>{if(bul.active) bul.destroy();}
+    });
+  }
+
+  update(time,delta){
+    if(this._caught||this._won) return;
+    this._camUpdate();
+    const px=this.player.x, py=this.player.y;
+    const pts=castVision(px,py,this._segs,VISION_RADIUS);
+    paintFog(px,py,pts);
+    paintMinimap(px,py);
+
+    if(this._state==='waiting') return;
+    const dt=delta/1000;
+
+    // Phase
+    this._pt-=dt; this._hudUpdate();
+    if(this._state==='safe'&&this._pt<=0){ this._enterPreHunt(); }
+    else if(this._state==='pre_hunt'){
+      const r=Math.ceil(Math.max(0,this._pt));
+      this._showOv(`<span style="font-size:96px;color:#e63946;">${r}</span>`,'殭屍即將衝出！快躲好！');
+      if(this._pt<=0) this._enterHunt();
+    } else if(this._state==='hunt'&&this._pt<=0){ this._enterSafe(); }
+
+    const {up,down,left,right,space,f}=this.keys;
+    const sx=px-_camX, sy=py-_camY;
+
+    // Cabinet proximity
+    let nc=null, nd=Infinity;
+    this._cabs.forEach(c=>{
+      const d=Phaser.Math.Distance.Between(px,py,c.x,c.y);
+      if(d<CABINET_RADIUS+32&&d<nd){nd=d;nc=c;}
+    });
+    this._nearCab=nc;
+
+    // Hide timer
+    if(this._hiding){
+      this._hideT+=dt;
+      const pct=Math.max(0,1-this._hideT/CABINET_HIDE_MAX);
+      this._hideBar.clear();
+      this._hideBar.fillStyle(0x000000,.55); this._hideBar.fillRect(sx-22,sy-44,44,7);
+      this._hideBar.fillStyle(pct>.4?0x50c878:0xe63946,1); this._hideBar.fillRect(sx-22,sy-44,44*pct,7);
+      if(this._hideT>=CABINET_HIDE_MAX) this._eject();
+    } else { this._hideBar.clear(); }
+
+    // SPACE = jump (purely visual, body.y unchanged)
+    const spDown=space.isDown;
+    if(spDown&&!this._spWas&&!this._hiding&&!this._jumping){
+      this._jumping=true; this._jumpT=0;
+      this.physics.world.removeCollider(this._zOvlp);
+    }
+    this._spWas=spDown;
+
+    if(this._jumping){
+      this._jumpT+=dt;
+      const t=this._jumpT/0.42;
+      if(t>=1){
+        this._jumping=false; this._jumpZ=0;
+        this.player.setDisplaySize(36,60);
+        this._shadow.clear();
+        this._zOvlp=this.physics.add.overlap(this.player,this.enemies,this._caught_cb,null,this);
+      } else {
+        this._jumpZ=Math.sin(t*Math.PI)*44;
+        const sc=1+Math.sin(t*Math.PI)*.2;
+        this.player.setDisplaySize(36*sc,60*sc);
+        this._shadow.clear();
+        const h2=Math.sin(t*Math.PI), sr=14*(1-h2*.5);
+        this._shadow.fillStyle(0x000000,.2*(1-h2*.6));
+        this._shadow.fillEllipse(px,py+10,sr*2,sr*.4);
+      }
+    } else { this._jumpZ=0; this._shadow.clear(); }
+
+    // Apply jump: offset player's render position (y-jumpZ), restore body
+    // We use setY on sprite but then sync body manually next frame via preUpdate
+    // SAFEST: set origin offset instead of touching .y
+    // Actually: just set y = body center y - jumpZ each frame, then on next frame
+    // physics resets body to sprite position... this is the same loop!
+    // REAL FIX: Don't call setY. Instead render a visual "jump ghost" sprite.
+    if(this._jumping){
+      // Move a visual ghost up; keep physics player invisible
+      if(!this._jumpGhost){
+        this._jumpGhost=this.add.image(px,py,'player').setDisplaySize(36,60).setDepth(6);
+        this.player.setAlpha(0);
+      }
+      const sc2=1+Math.sin((this._jumpT/0.42)*Math.PI)*.2;
+      this._jumpGhost.setPosition(px,py-this._jumpZ).setDisplaySize(36*sc2,60*sc2);
+      this._jumpGhost.setFlipX(this.player.flipX);
+    } else {
+      if(this._jumpGhost){ this._jumpGhost.destroy(); this._jumpGhost=null; }
+      if(!this._hiding) this.player.setAlpha(1);
+    }
+
+    // F = cabinet
+    const fDown=f.isDown;
+    if(fDown&&!this._fWas){
+      if(this._nearCab&&!this._hiding&&!this._jumping){
+        this._hiding=true; this._hideT=0; this.player.setAlpha(0.12);
+        document.getElementById('status-msg').textContent='躲在櫃子裡';
+        document.getElementById('status-msg').className='hiding';
+      } else if(this._hiding){ this._eject(); }
+    }
+    this._fWas=fDown;
+
+    // Movement
+    if(!this._hiding){
+      let vx=0,vy=0;
+      if(left.isDown) vx=-PLAYER_SPEED; if(right.isDown) vx=PLAYER_SPEED;
+      if(up.isDown)   vy=-PLAYER_SPEED; if(down.isDown)  vy=PLAYER_SPEED;
+      if(vx&&vy){vx*=0.707;vy*=0.707;}
+      this.player.setVelocity(vx,vy);
+      if(vx<0) this.player.setFlipX(true); else if(vx>0) this.player.setFlipX(false);
+    } else { this.player.setVelocity(0,0); }
+
+    // Move item labels (screen-fixed)
+    if(this._keyLbl) this._keyLbl.setPosition(sx+9,sy-24);
+    if(this._gunLbl) this._gunLbl.setPosition(sx-9,sy-24);
+
+    // Gun pickup
+    if(!this._hasGun&&this._gunSpr&&this._gunSpr.active&&Phaser.Geom.Circle.Contains(this._gunZone,px,py)){
+      this._hasGun=true; this._gunSpr.destroy(); this._gunSpr=null; this._itemHUD();
+      const gb=this.add.graphics().setDepth(25).setScrollFactor(0);
+      gb.fillStyle(0x000000,.72); gb.fillRoundedRect(VIEW_W/2-155,VIEW_H/2-34,310,60,12);
+      gb.lineStyle(2,0xaaaaaa,.9); gb.strokeRoundedRect(VIEW_W/2-155,VIEW_H/2-34,310,60,12);
+      const gm=this.add.text(VIEW_W/2,VIEW_H/2-4,'🔫  撿到手槍！(1發子彈)',{fontSize:'20px',fontFamily:'Courier New',color:'#fff',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(26).setScrollFactor(0);
+      this.tweens.add({targets:[gm,gb],alpha:0,delay:1400,duration:600,onComplete:()=>{gm.destroy();gb.destroy();}});
+      this._gunLbl=this.add.text(sx-9,sy-24,'🔫',{fontSize:'14px'}).setOrigin(0.5,1).setDepth(20).setScrollFactor(0);
+    }
+
+    // Key pickup
+    if(!this._hasKey&&Phaser.Geom.Circle.Contains(this._keyZone,px,py)){
+      this._hasKey=true; this._keySpr.destroy();
+      this._exitLocked=false; this._exitSpr.setTexture('exit_open');
+      this._hudUpdate(); this._itemHUD();
+      const bb=this.add.graphics().setDepth(25).setScrollFactor(0);
+      bb.fillStyle(0x000000,.72); bb.fillRoundedRect(VIEW_W/2-165,VIEW_H/2-34,330,60,12);
+      bb.lineStyle(2,0xFFD700,.9); bb.strokeRoundedRect(VIEW_W/2-165,VIEW_H/2-34,330,60,12);
+      const bm=this.add.text(VIEW_W/2,VIEW_H/2-4,'🔑  取得鑰匙！出口已解鎖',{fontSize:'22px',fontFamily:'Courier New',color:'#FFD700',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(26).setScrollFactor(0);
+      this.tweens.add({targets:[bm,bb],alpha:0,delay:1400,duration:600,onComplete:()=>{bm.destroy();bb.destroy();}});
+      this._keyLbl=this.add.text(sx+9,sy-24,'🔑',{fontSize:'14px'}).setOrigin(0.5,1).setDepth(20).setScrollFactor(0);
+    }
+
+    // Exit
+    if(!this._exitLocked&&Phaser.Geom.Circle.Contains(this._exitZone,px,py)){
+      this._won=true; this.physics.pause();
+      this._showOv('🎉','逃脫成功！<br><br><button onclick="resetGame()" style="margin-top:12px;padding:8px 20px;background:#27ae60;color:#fff;border:none;border-radius:8px;font-family:Courier New,monospace;font-size:15px;cursor:pointer;">🔄 再玩一局</button>');
+      this._ov.style.pointerEvents='auto';
+    }
+
+    // Enemy AI
+    this.enemies.getChildren().forEach(z=>{
+      if(z._ret){
+        const hx=z._hx||doorX(0), hy=z._hy||DOOR_Y+20;
+        const d=Phaser.Math.Distance.Between(z.x,z.y,hx,hy);
+        if(d>5){ const a=Phaser.Math.Angle.Between(z.x,z.y,hx,hy); z.setVelocity(Math.cos(a)*ENEMY_SPEED*.8,Math.sin(a)*ENEMY_SPEED*.8); z.setFlipX(Math.cos(a)<0); }
+        else { z.setVelocity(0,0); z.setPosition(hx,hy); }
+      } else if(this._state==='hunt'){
+        if(!this._hiding){ const a=Phaser.Math.Angle.Between(z.x,z.y,px,py); z.setVelocity(Math.cos(a)*ENEMY_SPEED,Math.sin(a)*ENEMY_SPEED); z.setFlipX(Math.cos(a)<0); }
+        else { z.setVelocity(z.body.velocity.x*.92,z.body.velocity.y*.92); }
+      } else if(this._state==='pre_hunt'){ z.setVelocity(z.body.velocity.x*.8,z.body.velocity.y*.8); }
+      else { z.setVelocity(z.body.velocity.x*.9,z.body.velocity.y*.9); }
+    });
+
+    // Hints
+    const atEx=Phaser.Geom.Circle.Contains(this._exitZone,px,py);
+    const atGun=this._gunSpr&&this._gunSpr.active&&Phaser.Geom.Circle.Contains(this._gunZone,px,py);
+    if(atEx&&this._exitLocked) this.hint.setText('需要 🔑 鑰匙才能開門！');
+    else if(atGun&&!this._hasGun) this.hint.setText('走近自動撿起手槍！');
+    else if(this._nearCab&&!this._hiding) this.hint.setText('[F] 躲入櫃子（最多5秒）');
+    else if(this._hiding) this.hint.setText('[F] 離開櫃子');
+    else this.hint.setText('');
+  }
+}
+
+const config={
+  type:Phaser.CANVAS,
+  width:VIEW_W, height:VIEW_H,
+  parent:'game-container',
+  backgroundColor:'#edf2ed',
+  physics:{default:'arcade',arcade:{gravity:{y:0},debug:false,fixedStep:true,fps:240,tileBias:32}},
+  scene:GameScene,
+};
+let game=new Phaser.Game(config);
+function startGame(){ const sc=game.scene.getScene('GameScene'); if(sc) sc.startGame(); }
+function resetGame(){
+  resetFog(); _mmLevel=null;
+  mmCtx.fillStyle='#000'; mmCtx.fillRect(0,0,MM_W,MM_H);
+  ['status-msg','clock-phase','clock-time','zombie-count','clock-box'].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    if(id==='status-msg'){el.textContent='等待開始';el.className='';}
+    else if(id==='clock-phase') el.textContent='待機中';
+    else if(id==='clock-time')  el.textContent='00:05';
+    else if(id==='zombie-count') el.textContent='🧟 ×1';
+    else if(id==='clock-box')   el.className='grey';
+  });
+  ['slot-gun','slot-key'].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    el.classList.add('empty'); el.classList.remove('has-item');
+    const b=el.querySelector('.badge'); if(b) b.remove();
+  });
+  document.querySelectorAll('#game-wrapper > div:not(#iso-shell):not(#item-hud):not(#btn-row)').forEach(el=>el.remove());
+  document.getElementById('start-btn').disabled=false;
+  game.destroy(true);
+  setTimeout(()=>{ game=new Phaser.Game(config); },150);
+}
+</script>
+</body>
+</html>
