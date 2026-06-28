@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>通風管逃脫 v3.1</title>
+  <title>通風管逃脫 v3.3</title>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script src="assets_v2.4.js"></script>
   <style>
@@ -35,9 +35,10 @@
     .game-btn{color:#fff;border:none;border-radius:6px;padding:6px 12px;
       font-family:'Courier New',monospace;font-size:13px;cursor:pointer;
       box-shadow:0 2px 6px rgba(0,0,0,.4);transition:background .15s;}
-    #reset-btn{background:#c0392b;} #reset-btn:hover{background:#e74c3c;}
-    #start-btn{background:#27ae60;} #start-btn:hover{background:#2ecc71;}
-    #start-btn:disabled{background:#555;cursor:default;}
+    #reset-btn{background:#c0392b;}     #reset-btn:hover{background:#e74c3c;}
+    #start-kb-btn{background:#2471a3;}   #start-kb-btn:hover{background:#2e86c1;}
+    #start-mob-btn{background:#27ae60;}  #start-mob-btn:hover{background:#2ecc71;}
+    #start-kb-btn:disabled,#start-mob-btn:disabled{background:#555;cursor:default;}
     #clock-box{display:flex;flex-direction:column;align-items:center;background:#0d0d1a;
       border:2px solid #444;border-radius:8px;padding:3px 10px;min-width:100px;
       font-family:'Courier New',monospace;transition:border-color .3s,background .3s;}
@@ -65,12 +66,59 @@
       justify-content:center;font-family:monospace;font-weight:bold;border:1px solid #fff;}
     .item-label{font-size:9px;color:rgba(255,255,255,0.5);font-family:'Courier New',monospace;
       letter-spacing:.05em;margin-top:2px;text-align:center;}
+
+    /* ── Virtual Controls (only visible in mobile mode) ── */
+    #vpad-wrap, #vbtn-wrap { display:none; pointer-events:none; }
+    body.mob-mode #vpad-wrap,
+    body.mob-mode #vbtn-wrap { display:block; }
+
+    #vpad-wrap {
+      position:absolute; bottom:12px; left:12px;
+      width:150px; height:150px; z-index:20;
+    }
+    #vpad-canvas {
+      display:block; touch-action:none; cursor:pointer;
+    }
+
+    #vbtn-wrap {
+      position:absolute; bottom:12px; right:12px;
+      z-index:20;
+    }
+    .vbtn-row { display:flex; gap:10px; margin-top:8px; justify-content:flex-end; }
+    .vbtn {
+      width:60px; height:60px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      font-size:22px; cursor:pointer; pointer-events:auto;
+      user-select:none; -webkit-user-select:none;
+      border:2.5px solid rgba(255,255,255,0.4);
+      background:rgba(20,20,50,0.75);
+      box-shadow:0 3px 12px rgba(0,0,0,0.5);
+      touch-action:none; transition:transform .08s;
+    }
+    .vbtn:active, .vbtn.pressed {
+      background:rgba(80,100,200,0.85);
+      transform:scale(0.88);
+    }
+    #vbtn-shoot { border-color:rgba(255,80,80,0.6); }
+    #vbtn-hide  { border-color:rgba(255,220,60,0.6); }
+    #vbtn-jump  { border-color:rgba(80,200,255,0.6); }
   </style>
 
   <!--
   ═══════════════════════════════════════════════
   通風管逃脫 — 版本更新說明
   ═══════════════════════════════════════════════
+  v3.3  手機虛擬控制器
+    - 圓形虛擬搖桿（左下）：touch/mouse 拖曳控制方向
+    - 三個虛擬按鈕（右下）：⬆️跳躍 🚪躲藏 🔫射擊
+    - 射擊自動瞄準最近殭屍
+    - 僅手機模式顯示，鍵盤模式不出現
+
+  v3.2  雙模式開始鍵
+    - ⌨️ 鍵盤開始 / 📱 手機開始 兩個獨立按鈕
+    - 修正 scene.startGame 與全域 startGame 同名衝突
+    - scene 方法改名為 _begin() 避免遮蔽
+
   v3.1 (2025)  跨平台相容版
     - 修正 Safari/Edge 效能問題：paintFog 改用固定
       offscreen dimCanvas，不再每幀 createElement
@@ -139,7 +187,7 @@
 </head>
 <body>
 <div id="hud">
-  <div>通風管逃脫 <span>v3.1</span></div>
+  <div>通風管逃脫 <span>v3.3</span></div>
   <div id="status-msg">等待開始</div>
   <div>WASD移動 · 空白跳躍 · F躲櫃子 · 左鍵射擊</div>
   <div id="clock-box" class="grey">
@@ -165,12 +213,27 @@
   </div>
   <!-- Buttons outside iso-shell so they're not squished -->
   <div id="btn-row">
-    <button class="game-btn" id="reset-btn" onclick="resetGame()">🔄 重置</button>
-    <button class="game-btn" id="start-btn" onclick="startGame()">▶ 開始</button>
+    <button class="game-btn" id="reset-btn"    onclick="resetGame()">🔄 重置</button>
+    <button class="game-btn" id="start-kb-btn" onclick="startGame('kb')">⌨️ 鍵盤開始</button>
+    <button class="game-btn" id="start-mob-btn" onclick="startGame('mob')">📱 手機開始</button>
   </div>
   <!-- fog and minimap outside iso-shell so they render at full height -->
   <canvas id="fog-canvas" width="800" height="560"></canvas>
   <canvas id="minimap-canvas" width="160" height="112"></canvas>
+
+  <!-- Virtual joystick: bottom-left, mob-mode only -->
+  <div id="vpad-wrap">
+    <canvas id="vpad-canvas" width="150" height="150"></canvas>
+  </div>
+
+  <!-- Virtual action buttons: bottom-right, mob-mode only -->
+  <div id="vbtn-wrap">
+    <button class="vbtn" id="vbtn-shoot">🔫</button>
+    <div class="vbtn-row">
+      <button class="vbtn" id="vbtn-hide">🚪</button>
+      <button class="vbtn" id="vbtn-jump">⬆️</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -533,8 +596,9 @@ class GameScene extends Phaser.Scene{
     this._hiding=false; this._hideT=0; this._nearCab=null;
     this._caught=false; this._won=false;
     this._keyLbl=null; this._gunLbl=null;
+    this._vbShootWas=false;
 
-    this._showOv('🐱','按「開始」進入遊戲<br><br>找到 🔑 鑰匙 → 抵達 EXIT 出口即勝利<br>F鍵躲入櫃子（最多5秒）· 空白鍵跳躍可閃過殭屍');
+    this._showOv('🐱','請選擇遊戲模式<br><br>⌨️ <b>鍵盤</b>：WASD移動・空白跳躍・F躲藏・左鍵射擊<br>📱 <b>手機</b>：觸控點擊移動目標位置<br><br>找到 🔑 鑰匙 → 抵達 EXIT 出口即勝利');
     this._hudUpdate();
   }
 
@@ -558,9 +622,8 @@ class GameScene extends Phaser.Scene{
   }
   _hideOv(){ this._ov.innerHTML=''; }
 
-  startGame(){
+  _begin(){
     if(this._state!=='waiting') return;
-    document.getElementById('start-btn').disabled=true;
     this._enterSafe();
   }
   _enterSafe(){
@@ -702,8 +765,8 @@ class GameScene extends Phaser.Scene{
       if(this._hideT>=CABINET_HIDE_MAX) this._eject();
     } else { this._hideBar.clear(); }
 
-    // SPACE = jump (purely visual, body.y unchanged)
-    const spDown=space.isDown;
+    // SPACE = jump (or virtual jump button)
+    const spDown=space.isDown||_vbJump;
     if(spDown&&!this._spWas&&!this._hiding&&!this._jumping){
       this._jumping=true; this._jumpT=0;
       this.physics.world.removeCollider(this._zOvlp);
@@ -749,8 +812,8 @@ class GameScene extends Phaser.Scene{
       if(!this._hiding) this.player.setAlpha(1);
     }
 
-    // F = cabinet
-    const fDown=f.isDown;
+    // F = cabinet (or virtual hide button)
+    const fDown=f.isDown||_vbHide;
     if(fDown&&!this._fWas){
       if(this._nearCab&&!this._hiding&&!this._jumping){
         this._hiding=true; this._hideT=0; this.player.setAlpha(0.12);
@@ -760,11 +823,20 @@ class GameScene extends Phaser.Scene{
     }
     this._fWas=fDown;
 
-    // Movement
+    // Movement — keyboard OR virtual joystick
     if(!this._hiding){
       let vx=0,vy=0;
-      if(left.isDown) vx=-PLAYER_SPEED; if(right.isDown) vx=PLAYER_SPEED;
-      if(up.isDown)   vy=-PLAYER_SPEED; if(down.isDown)  vy=PLAYER_SPEED;
+      if(left.isDown)  vx=-PLAYER_SPEED;
+      if(right.isDown) vx= PLAYER_SPEED;
+      if(up.isDown)    vy=-PLAYER_SPEED;
+      if(down.isDown)  vy= PLAYER_SPEED;
+      // Virtual joystick (overrides keyboard if active)
+      if(_vjActive){
+        const dead=0.15;
+        if(Math.abs(_vjX)>dead||Math.abs(_vjY)>dead){
+          vx=_vjX*PLAYER_SPEED; vy=_vjY*PLAYER_SPEED;
+        }
+      }
       if(vx&&vy){vx*=0.707;vy*=0.707;}
       this.player.setVelocity(vx,vy);
       if(vx<0) this.player.setFlipX(true); else if(vx>0) this.player.setFlipX(false);
@@ -819,15 +891,130 @@ class GameScene extends Phaser.Scene{
       else { z.setVelocity(z.body.velocity.x*.9,z.body.velocity.y*.9); }
     });
 
+    // Virtual shoot button (mobile mode)
+    if(_vbShoot&&!this._vbShootWas){
+      // Fire toward nearest enemy, or forward if none
+      let tx=px+100, ty=py;
+      let minD=Infinity;
+      this.enemies.getChildren().forEach(z=>{
+        const d=Phaser.Math.Distance.Between(px,py,z.x,z.y);
+        if(d<minD){ minD=d; tx=z.x; ty=z.y; }
+      });
+      this._shoot({x:tx-_camX, y:ty-_camY, leftButtonDown:()=>true});
+    }
+    this._vbShootWas=_vbShoot;
+
     // Hints
     const atEx=Phaser.Geom.Circle.Contains(this._exitZone,px,py);
     const atGun=this._gunSpr&&this._gunSpr.active&&Phaser.Geom.Circle.Contains(this._gunZone,px,py);
     if(atEx&&this._exitLocked) this.hint.setText('需要 🔑 鑰匙才能開門！');
     else if(atGun&&!this._hasGun) this.hint.setText('走近自動撿起手槍！');
-    else if(this._nearCab&&!this._hiding) this.hint.setText('[F] 躲入櫃子（最多5秒）');
-    else if(this._hiding) this.hint.setText('[F] 離開櫃子');
+    else if(this._nearCab&&!this._hiding) this.hint.setText(_mobMode?'[🚪] 躲入櫃子':'[F] 躲入櫃子（最多5秒）');
+    else if(this._hiding) this.hint.setText(_mobMode?'[🚪] 離開櫃子':'[F] 離開櫃子');
     else this.hint.setText('');
   }
+}
+
+// ═══════════════════════════════════════════
+// Virtual input state — read by Phaser update()
+// ═══════════════════════════════════════════
+let _vjX=0, _vjY=0, _vjActive=false;
+let _vbJump=false, _vbHide=false, _vbShoot=false;
+let _mobMode=false;
+
+// ── Joystick ──
+function _initVpad(){
+  const canvas=document.getElementById('vpad-canvas');
+  if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+  const R=60, CX=75, CY=75;
+  let stickX=CX, stickY=CY, active=false, pid=null;
+
+  function draw(){
+    ctx.clearRect(0,0,150,150);
+    // Outer ring
+    ctx.beginPath(); ctx.arc(CX,CY,R,0,Math.PI*2);
+    ctx.strokeStyle=active?'rgba(160,200,255,0.8)':'rgba(160,200,255,0.35)';
+    ctx.lineWidth=3; ctx.stroke();
+    ctx.fillStyle=active?'rgba(80,120,200,0.25)':'rgba(60,90,160,0.12)'; ctx.fill();
+    // Arrows
+    [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dx,dy])=>{
+      const ax=CX+dx*(R-14), ay=CY+dy*(R-14);
+      ctx.beginPath();
+      ctx.moveTo(ax+dy*7, ay-dx*7);
+      ctx.lineTo(ax-dy*7, ay+dx*7);
+      ctx.lineTo(ax+dx*8, ay+dy*8);
+      ctx.closePath();
+      ctx.fillStyle='rgba(180,210,255,0.4)'; ctx.fill();
+    });
+    // Knob
+    const kg=ctx.createRadialGradient(stickX-3,stickY-3,2,stickX,stickY,20);
+    kg.addColorStop(0,'rgba(180,200,255,0.95)');
+    kg.addColorStop(1,'rgba(60,90,200,0.75)');
+    ctx.beginPath(); ctx.arc(stickX,stickY,20,0,Math.PI*2);
+    ctx.fillStyle=kg; ctx.fill();
+    ctx.strokeStyle='rgba(200,220,255,0.6)'; ctx.lineWidth=2; ctx.stroke();
+  }
+
+  function move(cx,cy){
+    const rect=canvas.getBoundingClientRect();
+    const lx=cx-rect.left-CX, ly=cy-rect.top-CY;
+    const dist=Math.sqrt(lx*lx+ly*ly);
+    const clamp=Math.min(dist,R-4);
+    const nx=dist>0?lx/dist:0, ny=dist>0?ly/dist:0;
+    stickX=CX+nx*clamp; stickY=CY+ny*clamp;
+    _vjX=nx*(clamp/(R-4)); _vjY=ny*(clamp/(R-4));
+    draw();
+  }
+  function release(){
+    active=false; pid=null; _vjX=0; _vjY=0; _vjActive=false;
+    stickX=CX; stickY=CY; draw();
+  }
+
+  canvas.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    if(pid!==null) return;
+    const t=e.changedTouches[0]; pid=t.identifier; active=true; _vjActive=true;
+    move(t.clientX,t.clientY);
+  },{passive:false});
+  canvas.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    for(const t of e.changedTouches) if(t.identifier===pid){ move(t.clientX,t.clientY); break; }
+  },{passive:false});
+  canvas.addEventListener('touchend',e=>{
+    e.preventDefault();
+    for(const t of e.changedTouches) if(t.identifier===pid){ release(); break; }
+  },{passive:false});
+  canvas.addEventListener('mousedown',e=>{ active=true; _vjActive=true; move(e.clientX,e.clientY); });
+  window.addEventListener('mousemove',e=>{ if(active) move(e.clientX,e.clientY); });
+  window.addEventListener('mouseup',()=>{ if(active) release(); });
+  draw();
+}
+
+// ── Action buttons ──
+function _setupVBtn(id, setOn, setOff){
+  const el=document.getElementById(id);
+  if(!el) return;
+  const on =e=>{ e.preventDefault(); el.classList.add('pressed'); setOn(); };
+  const off=e=>{ e.preventDefault(); el.classList.remove('pressed'); setOff(); };
+  el.addEventListener('touchstart', on, {passive:false});
+  el.addEventListener('touchend',   off,{passive:false});
+  el.addEventListener('touchcancel',off,{passive:false});
+  el.addEventListener('mousedown', on);
+  el.addEventListener('mouseup',   off);
+  el.addEventListener('mouseleave',off);
+}
+
+function _initVbtns(){
+  _setupVBtn('vbtn-jump', ()=>_vbJump=true,  ()=>_vbJump=false);
+  _setupVBtn('vbtn-hide', ()=>_vbHide=true,  ()=>_vbHide=false);
+  _setupVBtn('vbtn-shoot',()=>_vbShoot=true, ()=>_vbShoot=false);
+}
+
+// Called from startGame('mob')
+function _initMobControls(){
+  _initVpad();
+  _initVbtns();
 }
 
 const config={
@@ -839,8 +1026,24 @@ const config={
   scene:GameScene,
 };
 let game=new Phaser.Game(config);
-function startGame(){ const sc=game.scene.getScene('GameScene'); if(sc) sc.startGame(); }
+function startGame(mode){
+  const sc=game.scene.getScene('GameScene');
+  if(!sc || !sc._begin){ setTimeout(()=>startGame(mode),100); return; }
+  document.getElementById('start-kb-btn').disabled=true;
+  document.getElementById('start-mob-btn').disabled=true;
+  _mobMode=(mode==='mob');
+  if(_mobMode){
+    document.body.classList.add('mob-mode');
+    _initMobControls();
+  } else {
+    document.body.classList.remove('mob-mode');
+  }
+  sc._begin();
+}
 function resetGame(){
+  _mobMode=false; _vjX=0; _vjY=0; _vjActive=false;
+  _vbJump=false; _vbHide=false; _vbShoot=false;
+  document.body.classList.remove('mob-mode');
   resetFog(); _mmLevel=null;
   mmCtx.fillStyle='#000'; mmCtx.fillRect(0,0,MM_W,MM_H);
   ['status-msg','clock-phase','clock-time','zombie-count','clock-box'].forEach(id=>{
@@ -857,7 +1060,8 @@ function resetGame(){
     const b=el.querySelector('.badge'); if(b) b.remove();
   });
   document.querySelectorAll('#game-wrapper > div:not(#iso-shell):not(#item-hud):not(#btn-row)').forEach(el=>el.remove());
-  document.getElementById('start-btn').disabled=false;
+  document.getElementById('start-kb-btn').disabled=false;
+  document.getElementById('start-mob-btn').disabled=false;
   game.destroy(true);
   setTimeout(()=>{ game=new Phaser.Game(config); },150);
 }
