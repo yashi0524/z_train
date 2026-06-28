@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
-  <title>通風管逃脫 v3.5</title>
+  <title>通風管逃脫 v3.6</title>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script src="assets_v2.4.js"></script>
   <style>
@@ -111,6 +111,12 @@
   ═══════════════════════════════════════════════
   通風管逃脫 — 版本更新說明
   ═══════════════════════════════════════════════
+  v3.6  修正重置切換模式 + iPad 按鈕無反應
+    - touchstart 攔截排除 button 元素，修正 iPad HUD 按鈕
+    - canvas clone 取代重複 addEventListener，修正重置後 vpad 失效
+    - _setupVBtn 同樣 clone 防重複綁定
+    - resetGame 移除 overlay div 確保 pointer-events 還原
+
   v3.5  修正虛擬按鈕不顯示
     - #vbtn-wrap mob-mode 改為 display:flex
     - #vpad-canvas 加入明確 width/height
@@ -202,7 +208,7 @@
 </head>
 <body>
 <div id="hud">
-  <div>通風管逃脫 <span>v3.5</span></div>
+  <div>通風管逃脫 <span>v3.6</span></div>
   <div id="status-msg">等待開始</div>
   <div>WASD移動 · 空白跳躍 · F躲櫃子 · 左鍵射擊</div>
   <div id="clock-box" class="grey">
@@ -941,7 +947,11 @@ let _mobMode=false;
 function _initVpad(){
   const canvas=document.getElementById('vpad-canvas');
   if(!canvas) return;
-  const ctx=canvas.getContext('2d');
+  // Remove old listeners by replacing canvas with a clone
+  const fresh=canvas.cloneNode(true);
+  canvas.parentNode.replaceChild(fresh,canvas);
+  const canvas2=document.getElementById('vpad-canvas'); // re-get after replace
+  const ctx=canvas2.getContext('2d');
   const R=60, CX=75, CY=75;
   let stickX=CX, stickY=CY, active=false, pid=null;
 
@@ -973,9 +983,9 @@ function _initVpad(){
 
   function move(cx,cy){
     // getBoundingClientRect can be zero if canvas not yet painted; use offsetWidth fallback
-    const rect=canvas.getBoundingClientRect();
-    const scaleX=rect.width>0 ? canvas.width/rect.width : 1;
-    const scaleY=rect.height>0 ? canvas.height/rect.height : 1;
+    const rect=canvas2.getBoundingClientRect();
+    const scaleX=rect.width>0 ? canvas2.width/rect.width : 1;
+    const scaleY=rect.height>0 ? canvas2.height/rect.height : 1;
     const lx=(cx-rect.left)*scaleX-CX;
     const ly=(cy-rect.top)*scaleY-CY;
     const dist=Math.sqrt(lx*lx+ly*ly);
@@ -991,30 +1001,38 @@ function _initVpad(){
     stickX=CX; stickY=CY; draw();
   }
 
-  canvas.addEventListener('touchstart',e=>{
+  canvas2.addEventListener('touchstart',e=>{
     e.preventDefault();
     if(pid!==null) return;
     const t=e.changedTouches[0]; pid=t.identifier; active=true; _vjActive=true;
     move(t.clientX,t.clientY);
   },{passive:false});
-  canvas.addEventListener('touchmove',e=>{
+  canvas2.addEventListener('touchmove',e=>{
     e.preventDefault();
     for(const t of e.changedTouches) if(t.identifier===pid){ move(t.clientX,t.clientY); break; }
   },{passive:false});
-  canvas.addEventListener('touchend',e=>{
+  canvas2.addEventListener('touchend',e=>{
     e.preventDefault();
     for(const t of e.changedTouches) if(t.identifier===pid){ release(); break; }
   },{passive:false});
-  canvas.addEventListener('mousedown',e=>{ active=true; _vjActive=true; move(e.clientX,e.clientY); });
-  window.addEventListener('mousemove',e=>{ if(active) move(e.clientX,e.clientY); });
-  window.addEventListener('mouseup',()=>{ if(active) release(); });
+  canvas2.addEventListener('mousedown',e=>{ active=true; _vjActive=true; move(e.clientX,e.clientY); });
+  // Store mouse handlers so we can remove on next init
+  if(window._vpadMouseMove) window.removeEventListener('mousemove',window._vpadMouseMove);
+  if(window._vpadMouseUp)   window.removeEventListener('mouseup',  window._vpadMouseUp);
+  window._vpadMouseMove=e=>{ if(active) move(e.clientX,e.clientY); };
+  window._vpadMouseUp  =()=>{ if(active) release(); };
+  window.addEventListener('mousemove',window._vpadMouseMove);
+  window.addEventListener('mouseup',  window._vpadMouseUp);
   draw();
 }
 
 // ── Action buttons ──
 function _setupVBtn(id, setOn, setOff){
-  const el=document.getElementById(id);
-  if(!el) return;
+  const old=document.getElementById(id);
+  if(!old) return;
+  // Clone to remove all old event listeners
+  const el=old.cloneNode(true);
+  old.parentNode.replaceChild(el,old);
   const on =e=>{ e.preventDefault(); el.classList.add('pressed'); setOn(); };
   const off=e=>{ e.preventDefault(); el.classList.remove('pressed'); setOff(); };
   el.addEventListener('touchstart', on, {passive:false});
@@ -1041,11 +1059,16 @@ function _initMobControls(){
 document.addEventListener('DOMContentLoaded',function(){
   const gw=document.getElementById('game-wrapper');
   if(gw){
-    gw.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
+    // Only prevent default when NOT touching a button/input element
+    // This allows HUD buttons to receive touch events normally
+    function shouldPrevent(e){
+      const t=e.target;
+      return !(t.tagName==='BUTTON'||t.tagName==='INPUT'||t.tagName==='A'||t.closest('button'));
+    }
+    gw.addEventListener('touchstart',e=>{ if(shouldPrevent(e)) e.preventDefault(); },{passive:false});
     gw.addEventListener('touchmove', e=>e.preventDefault(),{passive:false});
-    gw.addEventListener('touchend',  e=>e.preventDefault(),{passive:false});
+    gw.addEventListener('touchend',  e=>{ if(shouldPrevent(e)) e.preventDefault(); },{passive:false});
   }
-  // Also prevent document-level scroll
   document.body.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
 });
 
@@ -1095,7 +1118,10 @@ function resetGame(){
     el.classList.add('empty'); el.classList.remove('has-item');
     const b=el.querySelector('.badge'); if(b) b.remove();
   });
-  document.querySelectorAll('#game-wrapper > div:not(#iso-shell):not(#item-hud):not(#btn-row)').forEach(el=>el.remove());
+  // Remove overlay div so it gets recreated fresh (clears pointer-events:auto)
+  const oldOv=document.getElementById('game-overlay');
+  if(oldOv) oldOv.remove();
+  document.querySelectorAll('#game-wrapper > div:not(#iso-shell):not(#item-hud):not(#btn-row):not(#vpad-wrap):not(#vbtn-wrap)').forEach(el=>el.remove());
   document.getElementById('start-kb-btn').disabled=false;
   document.getElementById('start-mob-btn').disabled=false;
   game.destroy(true);
