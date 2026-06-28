@@ -2,17 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>通風管逃脫 v3.3</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+  <title>通風管逃脫 v3.5</title>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script src="assets_v2.4.js"></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
+    html,body{touch-action:none;overflow:hidden;}
     body{background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:'Courier New',monospace;}
     #game-wrapper{position:relative;display:inline-block;}
 
     /* The oblique illusion: squish the phaser canvas vertically + rotate slightly */
     /* We wrap it so the outer box keeps original size for fog/minimap overlay */
+    #iso-shell canvas{touch-action:none;}
     #iso-shell{
       display:block;
       transform: scaleY(0.6) rotateX(0deg);
@@ -69,8 +71,8 @@
 
     /* ── Virtual Controls (only visible in mobile mode) ── */
     #vpad-wrap, #vbtn-wrap { display:none; pointer-events:none; }
-    body.mob-mode #vpad-wrap,
-    body.mob-mode #vbtn-wrap { display:block; }
+    body.mob-mode #vpad-wrap { display:block; pointer-events:auto; }
+    body.mob-mode #vbtn-wrap { display:flex; flex-direction:column; align-items:flex-end; pointer-events:auto; }
 
     #vpad-wrap {
       position:absolute; bottom:12px; left:12px;
@@ -78,13 +80,14 @@
     }
     #vpad-canvas {
       display:block; touch-action:none; cursor:pointer;
+      width:150px; height:150px;
     }
 
     #vbtn-wrap {
       position:absolute; bottom:12px; right:12px;
-      z-index:20;
+      z-index:20; gap:8px;
     }
-    .vbtn-row { display:flex; gap:10px; margin-top:8px; justify-content:flex-end; }
+    .vbtn-row { display:flex; gap:10px; justify-content:flex-end; pointer-events:none; }
     .vbtn {
       width:60px; height:60px; border-radius:50%;
       display:flex; align-items:center; justify-content:center;
@@ -108,6 +111,18 @@
   ═══════════════════════════════════════════════
   通風管逃脫 — 版本更新說明
   ═══════════════════════════════════════════════
+  v3.5  修正虛擬按鈕不顯示
+    - #vbtn-wrap mob-mode 改為 display:flex
+    - #vpad-canvas 加入明確 width/height
+
+  v3.4  Safari/iPad 觸控修正
+    - viewport 加 user-scalable=no 防止 Safari 縮放
+    - html/body touch-action:none 防止頁面捲動
+    - game-wrapper 全域 preventDefault 攔截 touch 事件
+    - mob-mode class 先設定再用 rAF 初始化搖桿
+      (確保 getBoundingClientRect 有正確數值)
+    - vpad move() 加入 scaleX/Y 補償 CSS 縮放
+
   v3.3  手機虛擬控制器
     - 圓形虛擬搖桿（左下）：touch/mouse 拖曳控制方向
     - 三個虛擬按鈕（右下）：⬆️跳躍 🚪躲藏 🔫射擊
@@ -187,7 +202,7 @@
 </head>
 <body>
 <div id="hud">
-  <div>通風管逃脫 <span>v3.3</span></div>
+  <div>通風管逃脫 <span>v3.5</span></div>
   <div id="status-msg">等待開始</div>
   <div>WASD移動 · 空白跳躍 · F躲櫃子 · 左鍵射擊</div>
   <div id="clock-box" class="grey">
@@ -957,13 +972,18 @@ function _initVpad(){
   }
 
   function move(cx,cy){
+    // getBoundingClientRect can be zero if canvas not yet painted; use offsetWidth fallback
     const rect=canvas.getBoundingClientRect();
-    const lx=cx-rect.left-CX, ly=cy-rect.top-CY;
+    const scaleX=rect.width>0 ? canvas.width/rect.width : 1;
+    const scaleY=rect.height>0 ? canvas.height/rect.height : 1;
+    const lx=(cx-rect.left)*scaleX-CX;
+    const ly=(cy-rect.top)*scaleY-CY;
     const dist=Math.sqrt(lx*lx+ly*ly);
     const clamp=Math.min(dist,R-4);
     const nx=dist>0?lx/dist:0, ny=dist>0?ly/dist:0;
     stickX=CX+nx*clamp; stickY=CY+ny*clamp;
     _vjX=nx*(clamp/(R-4)); _vjY=ny*(clamp/(R-4));
+    _vjActive=true;
     draw();
   }
   function release(){
@@ -1017,6 +1037,18 @@ function _initMobControls(){
   _initVbtns();
 }
 
+// Prevent Safari from scrolling the page when touching the game area
+document.addEventListener('DOMContentLoaded',function(){
+  const gw=document.getElementById('game-wrapper');
+  if(gw){
+    gw.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
+    gw.addEventListener('touchmove', e=>e.preventDefault(),{passive:false});
+    gw.addEventListener('touchend',  e=>e.preventDefault(),{passive:false});
+  }
+  // Also prevent document-level scroll
+  document.body.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+});
+
 const config={
   type:Phaser.CANVAS,
   width:VIEW_W, height:VIEW_H,
@@ -1033,8 +1065,12 @@ function startGame(mode){
   document.getElementById('start-mob-btn').disabled=true;
   _mobMode=(mode==='mob');
   if(_mobMode){
+    // Add class first so elements become visible (display:block),
+    // then init after one animation frame so layout is calculated
     document.body.classList.add('mob-mode');
-    _initMobControls();
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      _initMobControls();
+    }));
   } else {
     document.body.classList.remove('mob-mode');
   }
