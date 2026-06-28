@@ -1,270 +1,350 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-TW">
 <head>
   <meta charset="UTF-8"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
-  <title>通風管逃脫 v3.6</title>
+  <meta name="color-scheme" content="light"/>
+  <title>通風管逃脫 v4.2</title>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script src="assets_v2.4.js"></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
-    html,body{touch-action:none;overflow:hidden;}
-    body{background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:'Courier New',monospace;}
-    #game-wrapper{position:relative;display:inline-block;}
+    html,body{
+      background:#1a1a2e;
+      display:flex;flex-direction:column;
+      align-items:center;justify-content:center;
+      min-height:100vh;
+      font-family:'Courier New',monospace;
+      touch-action:none;overflow:hidden;
+      user-select:none;-webkit-user-select:none;
+    }
 
-    /* The oblique illusion: squish the phaser canvas vertically + rotate slightly */
-    /* We wrap it so the outer box keeps original size for fog/minimap overlay */
-    #iso-shell canvas{touch-action:none;}
-    #iso-shell{
-      display:block;
-      transform: scaleY(0.6) rotateX(0deg);
-      transform-origin: top center;
+    /* ── Mode picker overlay (shown before any game starts) ── */
+    #mode-picker{
+      position:fixed;inset:0;
+      background:#1a1a2e;
+      display:flex;flex-direction:column;
+      align-items:center;justify-content:center;
+      gap:18px;z-index:999;
+      padding:24px;
+    }
+    #mode-picker h1{color:#50c878;font-size:22px;letter-spacing:.1em;text-align:center;}
+    #mode-picker p{color:#888;font-size:13px;text-align:center;max-width:340px;line-height:1.6;}
+    .picker-section{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%;max-width:380px;}
+    .picker-label{color:#aaa;font-size:11px;letter-spacing:.15em;text-transform:uppercase;}
+    .picker-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
+    .pick-btn{
+      padding:10px 20px;border:none;border-radius:8px;
+      font-family:'Courier New',monospace;font-size:14px;
+      cursor:pointer;color:#fff;
+      box-shadow:0 3px 10px rgba(0,0,0,.4);
+      transition:transform .1s,background .15s;
+      min-width:140px;text-align:center;
+    }
+    .pick-btn:active{transform:scale(.93);}
+    .pick-btn.res  {background:#2471a3;}
+    .pick-btn.res:hover{background:#2e86c1;}
+    .pick-btn.res.sel{background:#1a5276;outline:3px solid #50c878;}
+    .pick-btn.kb   {background:#2471a3;}
+    .pick-btn.kb:hover{background:#2e86c1;}
+    .pick-btn.mob  {background:#27ae60;}
+    .pick-btn.mob:hover{background:#2ecc71;}
+    .pick-btn.go   {background:#8e44ad;font-size:16px;}
+    .pick-btn.go:hover{background:#9b59b6;}
+    .pick-btn.go:disabled{background:#555;cursor:default;}
+    .pick-btn.reset{background:#c0392b;}
+    .pick-btn.reset:hover{background:#e74c3c;}
+    .pick-divider{width:100%;max-width:380px;border:none;border-top:1px solid #333;}
+
+    /* ── Outer shell: sized by JS to match chosen resolution ── */
+    #shell{
       position:relative;
+      overflow:hidden;  /* clip iso-shell overflow cleanly */
+    }
+
+    /* ── Phaser canvas wrapper: scaleY for oblique look ── */
+    #iso-shell{
+      position:absolute;top:0;left:0;
+      transform:scaleY(0.6);
+      transform-origin:top left;
       z-index:1;
     }
-    /* Fog and minimap sit OUTSIDE iso-shell so they're not squished */
-    #fog-canvas{position:absolute;top:0;left:0;pointer-events:none;z-index:3;}
-    #minimap-canvas{position:absolute;bottom:10px;left:10px;pointer-events:none;z-index:5;
-      border:2px solid rgba(255,255,255,0.3);border-radius:4px;box-shadow:0 0 10px rgba(0,0,0,0.5);}
+    #iso-shell canvas{display:block;touch-action:none;}
 
-    #hud{width:800px;display:flex;justify-content:space-between;align-items:center;
-      padding:8px 12px;background:#0d0d1a;border:2px solid #333;border-bottom:none;
-      color:#ccc;font-size:12px;letter-spacing:.08em;}
-    #hud span{color:#50c878;}
-    #status-msg{color:#888;font-size:11px;transition:color .3s;}
-    #status-msg.hiding{color:#7ec8e3;}
-    #btn-row{position:absolute;top:8px;left:10px;z-index:60;display:flex;gap:8px;}
-    .game-btn{color:#fff;border:none;border-radius:6px;padding:6px 12px;
-      font-family:'Courier New',monospace;font-size:13px;cursor:pointer;
-      box-shadow:0 2px 6px rgba(0,0,0,.4);transition:background .15s;}
-    #reset-btn{background:#c0392b;}     #reset-btn:hover{background:#e74c3c;}
-    #start-kb-btn{background:#2471a3;}   #start-kb-btn:hover{background:#2e86c1;}
-    #start-mob-btn{background:#27ae60;}  #start-mob-btn:hover{background:#2ecc71;}
-    #start-kb-btn:disabled,#start-mob-btn:disabled{background:#555;cursor:default;}
-    #clock-box{display:flex;flex-direction:column;align-items:center;background:#0d0d1a;
-      border:2px solid #444;border-radius:8px;padding:3px 10px;min-width:100px;
-      font-family:'Courier New',monospace;transition:border-color .3s,background .3s;}
-    #clock-box.red{border-color:#e63946;background:#1a0a0a;}
-    #clock-box.green{border-color:#50c878;background:#0a1a0f;}
-    #clock-box.grey{border-color:#444;background:#111;}
+    /* ── Info panel (right in A, bottom in B) ── */
+    #info-panel{
+      position:absolute;
+      background:#0d0d1a;
+      border:1px solid #333;
+      z-index:8;
+      display:flex;flex-direction:column;
+      align-items:center;justify-content:flex-start;
+      gap:0;overflow:hidden;
+    }
+    /* Mode A: bottom bar 800×160, sits at visual map bottom (320px from top) */
+    body.resA #info-panel{
+      top:320px;left:0;width:800px;height:160px;
+      flex-direction:row;flex-wrap:nowrap;
+      justify-content:space-between;align-items:center;
+      padding:0 8px;
+    }
+    body.resA #clock-box    { flex:0 0 120px; }
+    body.resA #status-wrap  { flex:0 0 120px; }
+    body.resA #minimap-wrap { flex:0 0 150px; }
+    body.resA #item-hud     { flex:1 1 auto; border-left:1px solid #333; justify-content:center; }
+    /* Mode B: bottom 400×200 */
+    body.resB #info-panel{
+      bottom:0;left:0;width:400px;height:200px;
+      flex-direction:row;flex-wrap:nowrap;
+      justify-content:space-between;align-items:center;
+      overflow:hidden;padding:0 4px;
+    }
+    /* Give each child in resB a flex basis so minimap isn't crushed */
+    body.resB #clock-box    { flex:0 0 80px; }
+    body.resB #status-wrap  { flex:0 0 72px; }
+    body.resB #minimap-wrap { flex:0 0 122px; }
+    body.resB #item-hud     { flex:0 0 100px; border-left:1px solid #333; }
+
+    /* clock */
+    #clock-box{
+      display:flex;flex-direction:column;align-items:center;
+      padding:8px 6px 6px;width:100%;border-bottom:1px solid #222;
+    }
+    body.resA #clock-box,body.resB #clock-box{width:auto;border-bottom:none;border-right:1px solid #222;padding:6px 12px;}
     #clock-phase{font-size:9px;letter-spacing:.1em;color:#777;}
-    #clock-box.red #clock-phase{color:#e63946;}
-    #clock-box.green #clock-phase{color:#50c878;}
-    #clock-time{font-size:15px;font-weight:bold;letter-spacing:.08em;color:#aaa;}
-    #clock-box.red #clock-time{color:#e63946;}
-    #clock-box.green #clock-time{color:#50c878;}
-    #zombie-count{font-size:10px;color:#7dab6e;}
-    #item-hud{position:absolute;bottom:10px;right:10px;z-index:6;
-      display:flex;flex-direction:row;align-items:flex-end;gap:12px;padding:10px 14px;
-      background:rgba(0,0,0,0.55);border-radius:12px;
-      border:1.5px solid rgba(255,255,255,0.15);pointer-events:none;}
-    .item-slot{width:52px;height:52px;border-radius:8px;background:rgba(255,255,255,0.06);
-      border:1.5px solid rgba(255,255,255,0.18);display:flex;align-items:center;
-      justify-content:center;font-size:26px;position:relative;}
-    .item-slot.has-item{border-color:rgba(255,220,80,0.6);background:rgba(255,220,80,0.08);}
-    .item-slot.empty{opacity:0.3;}
-    .item-slot .badge{position:absolute;bottom:-4px;right:-4px;background:#e63946;color:#fff;
-      font-size:9px;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;
-      justify-content:center;font-family:monospace;font-weight:bold;border:1px solid #fff;}
-    .item-label{font-size:9px;color:rgba(255,255,255,0.5);font-family:'Courier New',monospace;
-      letter-spacing:.05em;margin-top:2px;text-align:center;}
+    #clock-time{font-size:20px;font-weight:bold;color:#aaa;letter-spacing:.05em;}
+    #zombie-count{font-size:11px;color:#7dab6e;margin-top:2px;}
+    #clock-box.red  #clock-phase,#clock-box.red  #clock-time{color:#e63946;}
+    #clock-box.green#clock-phase,#clock-box.green#clock-time{color:#50c878;}
+    #clock-box.red  {background:#1a0a0a;}
+    #clock-box.green{background:#0a1a0f;}
 
-    /* ── Virtual Controls (only visible in mobile mode) ── */
-    #vpad-wrap, #vbtn-wrap { display:none; pointer-events:none; }
-    body.mob-mode #vpad-wrap { display:block; pointer-events:auto; }
-    body.mob-mode #vbtn-wrap { display:flex; flex-direction:column; align-items:flex-end; pointer-events:auto; }
-
-    #vpad-wrap {
-      position:absolute; bottom:12px; left:12px;
-      width:150px; height:150px; z-index:20;
+    /* status */
+    #status-wrap{
+      padding:6px;width:100%;text-align:center;border-bottom:1px solid #222;
     }
-    #vpad-canvas {
-      display:block; touch-action:none; cursor:pointer;
-      width:150px; height:150px;
+    body.resA #status-wrap,body.resB #status-wrap{width:auto;border-bottom:none;border-right:1px solid #222;padding:6px 10px;}
+    #status-msg{font-size:10px;color:#888;}
+    #status-msg.hiding{color:#7ec8e3;}
+
+    /* minimap inside info panel */
+    #minimap-wrap{padding:6px;width:100%;display:flex;justify-content:center;flex-shrink:0;}
+    body.resA #minimap-wrap,body.resB #minimap-wrap{
+      width:auto;padding:4px;flex-shrink:0;
+    }
+    #minimap-canvas{
+      border:1.5px solid rgba(255,255,255,0.25);
+      border-radius:3px;display:block;
     }
 
-    #vbtn-wrap {
-      position:absolute; bottom:12px; right:12px;
-      z-index:20; gap:8px;
+    /* item slots */
+    #item-hud{
+      padding:8px 6px;width:100%;
+      display:flex;flex-direction:column;align-items:center;gap:8px;
+      border-top:1px solid #222;margin-top:auto;
     }
-    .vbtn-row { display:flex; gap:10px; justify-content:flex-end; pointer-events:none; }
-    .vbtn {
-      width:60px; height:60px; border-radius:50%;
-      display:flex; align-items:center; justify-content:center;
-      font-size:22px; cursor:pointer; pointer-events:auto;
-      user-select:none; -webkit-user-select:none;
-      border:2.5px solid rgba(255,255,255,0.4);
-      background:rgba(20,20,50,0.75);
-      box-shadow:0 3px 12px rgba(0,0,0,0.5);
-      touch-action:none; transition:transform .08s;
+    body.resA #item-hud,body.resB #item-hud{
+      flex-direction:row;border-top:none;border-left:1px solid #222;
+      margin-top:0;padding:6px 10px;align-items:center;
+      width:auto;gap:10px;
     }
-    .vbtn:active, .vbtn.pressed {
-      background:rgba(80,100,200,0.85);
-      transform:scale(0.88);
+    .item-slot{
+      width:46px;height:46px;border-radius:8px;
+      background:rgba(255,255,255,.06);
+      border:1.5px solid rgba(255,255,255,.2);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      font-size:20px;cursor:default;position:relative;
     }
-    #vbtn-shoot { border-color:rgba(255,80,80,0.6); }
-    #vbtn-hide  { border-color:rgba(255,220,60,0.6); }
-    #vbtn-jump  { border-color:rgba(80,200,255,0.6); }
+    .item-slot.active-btn{cursor:pointer;pointer-events:auto;}
+    .item-slot.active-btn:active{background:rgba(80,100,180,.6);transform:scale(.9);}
+    .item-slot.has-item{border-color:rgba(255,220,80,.6);background:rgba(255,220,80,.08);}
+    .item-slot.empty{opacity:.3;}
+    .item-slot .badge{
+      position:absolute;bottom:-4px;right:-4px;
+      background:#e63946;color:#fff;font-size:9px;
+      border-radius:50%;width:16px;height:16px;
+      display:flex;align-items:center;justify-content:center;
+      font-family:monospace;font-weight:bold;border:1px solid #fff;
+    }
+    .item-label{font-size:8px;color:rgba(255,255,255,.4);margin-top:2px;text-align:center;}
+
+    /* fog canvas */
+    #fog-canvas{position:absolute;top:0;left:0;pointer-events:none;z-index:4;}
+
+    /* ── Virtual controls (mob-mode only) ── */
+    #vpad-wrap,#vbtn-wrap{display:none;pointer-events:none;}
+    body.mob-mode #vpad-wrap{display:block;pointer-events:auto;}
+    body.mob-mode #vbtn-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:auto;}
+    /* Mode A: above info panel (info is 160px tall at bottom) */
+    body.resA #vpad-wrap{position:absolute;bottom:168px;left:8px;z-index:20;}
+    body.resA #vbtn-wrap{position:absolute;bottom:168px;right:8px;z-index:20;}
+    /* Mode B: above info panel (200px tall) */
+    body.resB #vpad-wrap{position:absolute;bottom:208px;left:4px;z-index:20;}
+    body.resB #vbtn-wrap{position:absolute;bottom:208px;right:4px;z-index:20;}
+
+    #vpad-canvas{display:block;touch-action:none;}
+    .vbtn-row{display:flex;gap:8px;justify-content:flex-end;pointer-events:none;}
+    .vbtn{
+      width:54px;height:54px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      font-size:20px;cursor:pointer;pointer-events:auto;
+      border:2px solid rgba(255,255,255,.4);
+      background:rgba(20,20,50,.8);
+      box-shadow:0 3px 10px rgba(0,0,0,.5);
+      touch-action:none;transition:transform .08s;
+    }
+    .vbtn:active,.vbtn.pressed{background:rgba(80,100,200,.85);transform:scale(.88);}
+    #vbtn-jump{border-color:rgba(80,200,255,.6);}
+    #vbtn-hide{border-color:rgba(255,220,60,.6);}
+
+    /* ── Reset button (always visible, top of shell) ── */
+    #reset-btn{
+      position:absolute;top:6px;left:50%;transform:translateX(-50%);
+      z-index:70;background:#c0392b;color:#fff;border:none;border-radius:6px;
+      padding:5px 14px;font-family:'Courier New',monospace;font-size:12px;
+      cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);
+    }
+    #reset-btn:hover{background:#e74c3c;}
+
+    /* hint text */
+    #hint-text{
+      position:absolute;bottom:4px;
+      font-size:11px;color:#fff;
+      text-shadow:0 1px 3px #000;
+      pointer-events:none;z-index:12;
+      text-align:center;width:100%;
+    }
+    body.resA #hint-text{left:0;width:800px;bottom:164px;}
+    body.resB #hint-text{left:0;width:400px;bottom:204px;}
   </style>
 
   <!--
   ═══════════════════════════════════════════════
-  通風管逃脫 — 版本更新說明
+  通風管逃脫 v4.1 — 版本更新說明
   ═══════════════════════════════════════════════
-  v3.6  修正重置切換模式 + iPad 按鈕無反應
-    - touchstart 攔截排除 button 元素，修正 iPad HUD 按鈕
-    - canvas clone 取代重複 addEventListener，修正重置後 vpad 失效
-    - _setupVBtn 同樣 clone 防重複綁定
-    - resetGame 移除 overlay div 確保 pointer-events 還原
+  v4.2  直向小地圖修正
+    - initMinimap 加入 canvas CSS size 設定
+    - resB info panel 各子元素加 flex:0 0 固定寬度
+    - resA 同步改為 flex basis 確保不被壓縮
 
-  v3.5  修正虛擬按鈕不顯示
-    - #vbtn-wrap mob-mode 改為 display:flex
-    - #vpad-canvas 加入明確 width/height
+  v4.1  橫向佈局修正 + 直向小地圖修正
+    - 模式A: Phaser canvas 800×534，視覺地圖 800×320
+    - 模式A資訊欄: 800×160 橫向排列，置於視覺地圖下方
+    - 模式B: 修正 flex-wrap 導致小地圖消失，改 nowrap
+    - 虛擬控制器位置隨資訊欄高度更新
 
-  v3.4  Safari/iPad 觸控修正
-    - viewport 加 user-scalable=no 防止 Safari 縮放
-    - html/body touch-action:none 防止頁面捲動
-    - game-wrapper 全域 preventDefault 攔截 touch 事件
-    - mob-mode class 先設定再用 rAF 初始化搖桿
-      (確保 getBoundingClientRect 有正確數值)
-    - vpad move() 加入 scaleX/Y 補償 CSS 縮放
+  v4.0  雙解析度佈局 + 全面重構
+    - 選模式畫面：選解析度 A(800×480) 或 B(400×800)
+    - 模式 A：遊戲區 640×480，右側 160px 資訊欄
+    - 模式 B：遊戲區 400×600，底部 200px 資訊欄
+    - 資訊欄內含：時鐘、殭屍數、小地圖、道具欄
+    - 鑰匙圖示不可點（顯示用）；手槍圖示=射擊按鈕
+    - 手機模式：虛擬搖桿 + 跳躍/躲藏按鈕
+    - 重置鍵回到模式選擇畫面
 
-  v3.3  手機虛擬控制器
-    - 圓形虛擬搖桿（左下）：touch/mouse 拖曳控制方向
-    - 三個虛擬按鈕（右下）：⬆️跳躍 🚪躲藏 🔫射擊
-    - 射擊自動瞄準最近殭屍
-    - 僅手機模式顯示，鍵盤模式不出現
-
-  v3.2  雙模式開始鍵
-    - ⌨️ 鍵盤開始 / 📱 手機開始 兩個獨立按鈕
-    - 修正 scene.startGame 與全域 startGame 同名衝突
-    - scene 方法改名為 _begin() 避免遮蔽
-
-  v3.1 (2025)  跨平台相容版
-    - 修正 Safari/Edge 效能問題：paintFog 改用固定
-      offscreen dimCanvas，不再每幀 createElement
-    - 加入 X-UA-Compatible、color-scheme meta 標籤
-    - 修正視野邊界：世界邊界線段加 1px inset
-    - 物理引擎 fps 提升至 240，牆體碰撞加 tileBias
-    - 玩家/敵人加 setMaxVelocity 防穿牆
-    - 視野半徑從 160 增加到 200
-
-  v3.0  視野與穿牆修正
-    - 可視範圍邊界線段修正（1px inset）
-    - 物理 fps 提升至 240 + tileBias:32
-    - 牆體碰撞箱在薄方向各加 4px
-    - VISION_RADIUS 200
-
-  v2.9  三個 Bug 修正
-    - 重置後按鈕不再消失（排除 #btn-row）
-    - 跳躍結束後貓咪不再變扁（36×60 補償）
-    - 被抓/勝利遮罩內建重置按鈕，pointer-events:auto
-
-  v2.8  視覺/介面調整
-    - 貓咪/殭屍/物件高度補償 CSS scaleY(0.6)
-    - 按鈕移出 iso-shell，不再被壓扁
-    - 小地圖移至左下角
-    - 道具欄移至右下角，橫向排列
-
-  v2.7  可視範圍中心修正
-    - fogY() 將世界 Y 乘以 ISO_SCALE 再繪製
-    - exploredCanvas 高度縮減為 MAP_H×ISO_SCALE
-    - 視野暈圈半徑同步乘以 ISO_SCALE
-
-  v2.6  斜角視角 + 跳躍閃避
-    - CSS scaleY(0.6) 實現 45° 俯視斜角
-    - 跳躍用 ghost sprite 方案，物理 body 不動
-    - 跳躍期間暫時移除殭屍碰撞 overlap
-
-  v2.5  ISO 投影修正（全部重寫）
-    - 物理和相機統一在 ISO 空間運作
-    - 修正 v2.4 isoContainer 方案的相機追蹤失敗
-
-  v2.4  斜角視角首次嘗試（isoContainer 方案）
-
-  v2.3  手槍 + 跳躍 + 道具欄
-    - 空白鍵跳躍、F 鍵躲櫃子
-    - 手槍 1 發子彈，左鍵射擊擊退殭屍
-    - 右側道具欄（手槍/鑰匙）
-
-  v2.2  地圖 2 倍、出口隨機邊緣、鑰匙提示強化
-
-  v2.1  修正貓咪只能在左上角移動
-    - 加入 physics.world.setBounds(MAP_W, MAP_H)
-
-  v2.0  大地圖 + 相機捲動 + 小地圖
-    - 地圖 1600×1120（2 倍視窗）
-    - WASD 移動觸發相機捲動（邊緣 200px）
-    - 右上角小地圖即時顯示貓咪位置
-    - assets.js 獨立貼圖檔案
-
-  v1.x  基礎遊戲功能
-    - 貓咪/殭屍/通風管/火車/鑰匙/出口
-    - 追捕期/安全期循環
-    - 戰爭迷霧 + 射線視野
-    - 隨機地圖生成
+  v3.x  基礎遊戲 + 觸控支援
   ═══════════════════════════════════════════════
   -->
 </head>
 <body>
-<div id="hud">
-  <div>通風管逃脫 <span>v3.6</span></div>
-  <div id="status-msg">等待開始</div>
-  <div>WASD移動 · 空白跳躍 · F躲櫃子 · 左鍵射擊</div>
-  <div id="clock-box" class="grey">
-    <div id="clock-phase">待機中</div>
-    <div id="clock-time">00:05</div>
-    <div id="zombie-count">🧟 ×1</div>
+
+<!-- ── Mode picker ── -->
+<div id="mode-picker">
+  <h1>🐱 通風管逃脫</h1>
+  <p>找到 🔑 鑰匙 → 抵達 EXIT 出口逃脫<br>躲入櫃子最多 5 秒 · 跳躍可閃過殭屍</p>
+
+  <hr class="pick-divider"/>
+
+  <div class="picker-section">
+    <div class="picker-label">📐 選擇解析度</div>
+    <div class="picker-row">
+      <button class="pick-btn res" id="btn-resA" onclick="selectRes('A')">
+        A — 800×480<br><small style="font-size:11px;opacity:.7">橫式 / iPad橫向</small>
+      </button>
+      <button class="pick-btn res" id="btn-resB" onclick="selectRes('B')">
+        B — 400×800<br><small style="font-size:11px;opacity:.7">直式 / iPhone直立</small>
+      </button>
+    </div>
+  </div>
+
+  <div class="picker-section">
+    <div class="picker-label">🎮 選擇控制方式</div>
+    <div class="picker-row">
+      <button class="pick-btn kb"  onclick="launch('kb')"  id="btn-kb"  disabled>⌨️ 鍵盤開始</button>
+      <button class="pick-btn mob" onclick="launch('mob')" id="btn-mob" disabled>📱 手機開始</button>
+    </div>
   </div>
 </div>
-<div id="game-wrapper">
-  <div id="item-hud">
-    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
-      <div class="item-slot empty" id="slot-gun">🔫</div>
-      <div class="item-label">手槍</div>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
-      <div class="item-slot empty" id="slot-key">🔑</div>
-      <div class="item-label">鑰匙</div>
-    </div>
-  </div>
-  <!-- iso-shell: Phaser canvas gets CSS scaleY to look oblique -->
-  <div id="iso-shell">
-    <div id="game-container"></div>
-  </div>
-  <!-- Buttons outside iso-shell so they're not squished -->
-  <div id="btn-row">
-    <button class="game-btn" id="reset-btn"    onclick="resetGame()">🔄 重置</button>
-    <button class="game-btn" id="start-kb-btn" onclick="startGame('kb')">⌨️ 鍵盤開始</button>
-    <button class="game-btn" id="start-mob-btn" onclick="startGame('mob')">📱 手機開始</button>
-  </div>
-  <!-- fog and minimap outside iso-shell so they render at full height -->
-  <canvas id="fog-canvas" width="800" height="560"></canvas>
-  <canvas id="minimap-canvas" width="160" height="112"></canvas>
 
-  <!-- Virtual joystick: bottom-left, mob-mode only -->
-  <div id="vpad-wrap">
-    <canvas id="vpad-canvas" width="150" height="150"></canvas>
+<!-- ── Game shell (hidden until launched) ── -->
+<div id="shell" style="display:none;">
+  <div id="iso-shell"><div id="game-container"></div></div>
+  <canvas id="fog-canvas"></canvas>
+
+  <!-- Info panel -->
+  <div id="info-panel">
+    <div id="clock-box" class="grey">
+      <div id="clock-phase">待機中</div>
+      <div id="clock-time">00:05</div>
+      <div id="zombie-count">🧟 ×1</div>
+    </div>
+    <div id="status-wrap"><div id="status-msg">等待開始</div></div>
+    <div id="minimap-wrap"><canvas id="minimap-canvas"></canvas></div>
+    <div id="item-hud">
+      <!-- Gun slot: active button in mob-mode -->
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+        <div class="item-slot empty" id="slot-gun" title="手槍 (點擊射擊)">🔫</div>
+        <div class="item-label">手槍</div>
+      </div>
+      <!-- Key slot: display only -->
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+        <div class="item-slot empty" id="slot-key" title="鑰匙">🔑</div>
+        <div class="item-label">鑰匙</div>
+      </div>
+    </div>
   </div>
 
-  <!-- Virtual action buttons: bottom-right, mob-mode only -->
+  <!-- Fog overlay -->
+  <!-- (fog-canvas already declared above) -->
+
+  <!-- Reset (centred, always visible) -->
+  <button id="reset-btn" onclick="resetGame()">🔄 重置</button>
+
+  <!-- Hint text -->
+  <div id="hint-text"></div>
+
+  <!-- Virtual joystick -->
+  <div id="vpad-wrap"><canvas id="vpad-canvas" width="130" height="130"></canvas></div>
+
+  <!-- Virtual action buttons -->
   <div id="vbtn-wrap">
-    <button class="vbtn" id="vbtn-shoot">🔫</button>
-    <div class="vbtn-row">
-      <button class="vbtn" id="vbtn-hide">🚪</button>
-      <button class="vbtn" id="vbtn-jump">⬆️</button>
-    </div>
+    <button class="vbtn" id="vbtn-jump">⬆️</button>
+    <button class="vbtn" id="vbtn-hide">🚪</button>
   </div>
 </div>
 
 <script>
-// ═══════════════════════════════════════════
-// Constants — pure top-down physics, CSS handles oblique look
-// ═══════════════════════════════════════════
-const VIEW_W=800, VIEW_H=560;
-const ISO_SCALE=0.6;  // must match CSS scaleY on #iso-shell
+// ═══════════════════════════════════════════════
+// Layout configurations
+// ═══════════════════════════════════════════════
+const LAYOUTS={
+  // A: total 800×480, game canvas 800×534 (visual height=320), info bar 800×160 at bottom
+  A:{ totalW:800, totalH:480, gameW:800, gameH:534, infoW:800, infoH:160, mmW:130, mmH:91,  resB:false },
+  // B: total 400×800, game canvas 400×600, info bar 400×200 at bottom
+  B:{ totalW:400, totalH:800, gameW:400, gameH:600, infoW:400, infoH:200, mmW:110, mmH:77,  resB:true  }
+};
+
+// ── Current layout (set by selectRes) ──
+let LAY=null;
+let VIEW_W=640, VIEW_H=480;  // Phaser canvas size (game area)
+
+// ── ISO scale ──
+const ISO_SCALE=0.6;
+
+// ── Game constants ──
 const MAP_W=1600, MAP_H=1120;
-const SCROLL_MARGIN=200;
+const SCROLL_MARGIN=180;
 const PLAYER_SPEED=220, ENEMY_SPEED=110;
 const VISION_RADIUS=200;
 const CABINET_RADIUS=22;
@@ -274,89 +354,27 @@ const MAX_TRAIN_CARS=5;
 const TILE=40;
 const TRAIN_X=10, TRAIN_Y=10;
 const CAR_W=108, CAR_H=52, CAR_GAP=4, LOCO_W=62;
-function doorX(i){ return TRAIN_X+8+i*(CAR_W+CAR_GAP)+CAR_W-22; }
+function doorX(i){return TRAIN_X+8+i*(CAR_W+CAR_GAP)+CAR_W-22;}
 const DOOR_Y=TRAIN_Y+10;
-const MM_W=160, MM_H=112;
-const MM_SX=MM_W/MAP_W, MM_SY=MM_H/MAP_H;
 
-// ── Fog of War ─────────────────────────────
+// ── Fog canvases (resized on launch) ──
 const fogCanvas=document.getElementById('fog-canvas');
 const fogCtx=fogCanvas.getContext('2d');
 const exploredCanvas=document.createElement('canvas');
-exploredCanvas.width=MAP_W; exploredCanvas.height=MAP_H*ISO_SCALE;
 const exploredCtx=exploredCanvas.getContext('2d');
-exploredCtx.fillStyle='#000'; exploredCtx.fillRect(0,0,MAP_W,MAP_H*ISO_SCALE);
-// Persistent offscreen canvas for dim-memory layer (avoids per-frame allocation)
 const dimCanvas=document.createElement('canvas');
-dimCanvas.width=VIEW_W; dimCanvas.height=VIEW_H;
 const dimCtx=dimCanvas.getContext('2d');
-let _camX=0,_camY=0;
+let _camX=0, _camY=0;
 
-// sy = world y → fog-canvas y (apply ISO_SCALE to compensate CSS scaleY)
-function fogY(worldY){ return worldY * ISO_SCALE; }
-// camY in fog-canvas space
-function fogCamY(){ return _camY * ISO_SCALE; }
+function fogY(wy){return wy*ISO_SCALE;}
+function fogCamY(){return _camY*ISO_SCALE;}
 
-function paintFog(px,py,vpts){
-  const fcamY=fogCamY();
-
-  // Paint explored region (persistent white mask)
-  if(vpts&&vpts.length>=3){
-    exploredCtx.save();
-    exploredCtx.fillStyle='#fff';
-    exploredCtx.beginPath();
-    exploredCtx.moveTo(vpts[0].x, fogY(vpts[0].y));
-    for(let i=1;i<vpts.length;i++) exploredCtx.lineTo(vpts[i].x, fogY(vpts[i].y));
-    exploredCtx.closePath();
-    exploredCtx.fill();
-    exploredCtx.restore();
-  }
-
-  // Step 1: full black fog
-  fogCtx.globalAlpha=1;
-  fogCtx.fillStyle='#000';
-  fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
-
-  // Step 2: reveal explored areas (punch holes = destination-out)
-  fogCtx.save();
-  fogCtx.globalCompositeOperation='destination-out';
-  fogCtx.drawImage(exploredCanvas,_camX,fcamY,VIEW_W,VIEW_H,0,0,VIEW_W,VIEW_H);
-  fogCtx.restore();
-
-  if(vpts&&vpts.length>=3){
-    // Step 3: re-darken explored-but-not-visible using persistent dimCanvas
-    dimCtx.clearRect(0,0,VIEW_W,VIEW_H);
-    // Draw explored region into dimCanvas
-    dimCtx.drawImage(exploredCanvas,_camX,fcamY,VIEW_W,VIEW_H,0,0,VIEW_W,VIEW_H);
-    // Multiply with dark colour using source-in
-    dimCtx.save();
-    dimCtx.globalCompositeOperation='source-in';
-    dimCtx.fillStyle='rgba(0,0,0,0.72)';
-    dimCtx.fillRect(0,0,VIEW_W,VIEW_H);
-    dimCtx.restore();
-    // Cut out current vision polygon
-    dimCtx.save();
-    dimCtx.globalCompositeOperation='destination-out';
-    dimCtx.beginPath();
-    dimCtx.moveTo(vpts[0].x-_camX, fogY(vpts[0].y)-fcamY);
-    for(let i=1;i<vpts.length;i++) dimCtx.lineTo(vpts[i].x-_camX, fogY(vpts[i].y)-fcamY);
-    dimCtx.closePath();
-    dimCtx.fill();
-    dimCtx.restore();
-    // Composite dimCanvas onto fog
-    fogCtx.drawImage(dimCanvas,0,0);
-
-    // Step 4: vignette at vision edge
-    const fpx=px-_camX, fpy=fogY(py)-fcamY;
-    const gr=fogCtx.createRadialGradient(
-      fpx,fpy,VISION_RADIUS*ISO_SCALE*0.8,
-      fpx,fpy,VISION_RADIUS*ISO_SCALE*1.25
-    );
-    gr.addColorStop(0,'rgba(0,0,0,0)');
-    gr.addColorStop(1,'rgba(0,0,0,0.4)');
-    fogCtx.fillStyle=gr;
-    fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
-  }
+function initFogCanvases(){
+  fogCanvas.width=VIEW_W; fogCanvas.height=VIEW_H;
+  exploredCanvas.width=MAP_W; exploredCanvas.height=MAP_H*ISO_SCALE;
+  exploredCtx.fillStyle='#000'; exploredCtx.fillRect(0,0,MAP_W,MAP_H*ISO_SCALE);
+  dimCanvas.width=VIEW_W; dimCanvas.height=VIEW_H;
+  fogCtx.fillStyle='#000'; fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
 }
 function resetFog(){
   exploredCtx.fillStyle='#000'; exploredCtx.fillRect(0,0,MAP_W,MAP_H*ISO_SCALE);
@@ -364,10 +382,57 @@ function resetFog(){
   fogCtx.fillStyle='#000'; fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
 }
 
-// ── Minimap ────────────────────────────────
+function paintFog(px,py,vpts){
+  const fcamY=fogCamY();
+  if(vpts&&vpts.length>=3){
+    exploredCtx.save(); exploredCtx.fillStyle='#fff';
+    exploredCtx.beginPath();
+    exploredCtx.moveTo(vpts[0].x,fogY(vpts[0].y));
+    for(let i=1;i<vpts.length;i++) exploredCtx.lineTo(vpts[i].x,fogY(vpts[i].y));
+    exploredCtx.closePath(); exploredCtx.fill(); exploredCtx.restore();
+  }
+  fogCtx.globalAlpha=1; fogCtx.fillStyle='#000';
+  fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
+  fogCtx.save();
+  fogCtx.globalCompositeOperation='destination-out';
+  fogCtx.drawImage(exploredCanvas,_camX,fcamY,VIEW_W,VIEW_H,0,0,VIEW_W,VIEW_H);
+  fogCtx.restore();
+  if(vpts&&vpts.length>=3){
+    dimCtx.clearRect(0,0,VIEW_W,VIEW_H);
+    dimCtx.drawImage(exploredCanvas,_camX,fcamY,VIEW_W,VIEW_H,0,0,VIEW_W,VIEW_H);
+    dimCtx.save(); dimCtx.globalCompositeOperation='source-in';
+    dimCtx.fillStyle='rgba(0,0,0,0.72)'; dimCtx.fillRect(0,0,VIEW_W,VIEW_H); dimCtx.restore();
+    dimCtx.save(); dimCtx.globalCompositeOperation='destination-out';
+    dimCtx.beginPath();
+    dimCtx.moveTo(vpts[0].x-_camX,fogY(vpts[0].y)-fcamY);
+    for(let i=1;i<vpts.length;i++) dimCtx.lineTo(vpts[i].x-_camX,fogY(vpts[i].y)-fcamY);
+    dimCtx.closePath(); dimCtx.fill(); dimCtx.restore();
+    fogCtx.drawImage(dimCanvas,0,0);
+    const fpx=px-_camX, fpy=fogY(py)-fcamY;
+    const gr=fogCtx.createRadialGradient(fpx,fpy,VISION_RADIUS*ISO_SCALE*.8,fpx,fpy,VISION_RADIUS*ISO_SCALE*1.25);
+    gr.addColorStop(0,'rgba(0,0,0,0)'); gr.addColorStop(1,'rgba(0,0,0,0.4)');
+    fogCtx.fillStyle=gr; fogCtx.fillRect(0,0,VIEW_W,VIEW_H);
+  }
+}
+
+// ── Minimap ──────────────────────────────────
 const mmCanvas=document.getElementById('minimap-canvas');
 const mmCtx=mmCanvas.getContext('2d');
 let _mmLevel=null;
+let MM_W=140, MM_H=98;
+let MM_SX=MM_W/MAP_W, MM_SY=MM_H/MAP_H;
+
+function initMinimap(){
+  MM_W=LAY.mmW; MM_H=LAY.mmH;
+  MM_SX=MM_W/MAP_W; MM_SY=MM_H/MAP_H;
+  // Set both canvas buffer size AND CSS display size
+  mmCanvas.width=MM_W; mmCanvas.height=MM_H;
+  mmCanvas.style.width=MM_W+'px';
+  mmCanvas.style.height=MM_H+'px';
+  mmCanvas.style.display='block';
+  mmCanvas.style.flexShrink='0';
+}
+
 function paintMinimap(px,py){
   if(!_mmLevel) return;
   const {walls,pillars,cabinets,exit,key,keyCollected,exitLocked}=_mmLevel;
@@ -385,22 +450,19 @@ function paintMinimap(px,py){
   mmCtx.fillStyle=exitLocked?'#888':'#00ff88';
   mmCtx.fillRect((exit.x-8)*MM_SX,(exit.y-8)*MM_SY,16*MM_SX,16*MM_SY);
   mmCtx.fillStyle='#50c878';
-  mmCtx.beginPath(); mmCtx.arc(px*MM_SX,py*MM_SY,3.5,0,Math.PI*2); mmCtx.fill();
-  mmCtx.strokeStyle='#fff'; mmCtx.lineWidth=1; mmCtx.stroke();
-  mmCtx.strokeStyle='rgba(255,255,255,0.22)'; mmCtx.lineWidth=1;
-  mmCtx.strokeRect(_camX*MM_SX,_camY*MM_SY,VIEW_W*MM_SX,(VIEW_H/ISO_SCALE)*MM_SY);
+  mmCtx.beginPath();mmCtx.arc(px*MM_SX,py*MM_SY,3.5,0,Math.PI*2);mmCtx.fill();
+  mmCtx.strokeStyle='#fff';mmCtx.lineWidth=1;mmCtx.stroke();
+  mmCtx.strokeStyle='rgba(255,255,255,0.2)';mmCtx.lineWidth=1;
+  mmCtx.strokeRect(_camX*MM_SX,_camY*MM_SY,VIEW_W*MM_SX,VIEW_H*MM_SY);
 }
 
-// ── Ray-cast ───────────────────────────────
+// ── Ray-cast ─────────────────────────────────
 function buildSegs(walls,pillars){
   const s=[];
   function r(x,y,w,h){s.push([x,y,x+w,y],[x+w,y,x+w,y+h],[x+w,y+h,x,y+h],[x,y+h,x,y]);}
   walls.forEach(w=>r(w.x,w.y,w.w,w.h));
   pillars.forEach(p=>r(p.x-p.s,p.y-p.s,p.s*2,p.s*2));
-  // World boundary — use 1px inset so rays always hit it before going OOB
-  const E=1;
-  r(-E,-E,MAP_W+E*2,MAP_H+E*2);
-  return s;
+  const E=1; r(-E,-E,MAP_W+E*2,MAP_H+E*2); return s;
 }
 function castVision(px,py,segs,rad){
   const angles=[];
@@ -409,28 +471,28 @@ function castVision(px,py,segs,rad){
   });
   const pts=[];
   angles.forEach(angle=>{
-    const dx=Math.cos(angle),dy=Math.sin(angle); let minT=rad;
+    const dx=Math.cos(angle),dy=Math.sin(angle);let minT=rad;
     segs.forEach(([x1,y1,x2,y2])=>{
-      const ex=x2-x1,ey=y2-y1,d=dx*ey-dy*ex; if(Math.abs(d)<1e-8) return;
-      const t=((x1-px)*ey-(y1-py)*ex)/d, u=((x1-px)*dy-(y1-py)*dx)/d;
-      if(t>=0&&t<minT&&u>=0&&u<=1) minT=t;
+      const ex=x2-x1,ey=y2-y1,d=dx*ey-dy*ex;if(Math.abs(d)<1e-8)return;
+      const t=((x1-px)*ey-(y1-py)*ex)/d,u=((x1-px)*dy-(y1-py)*dx)/d;
+      if(t>=0&&t<minT&&u>=0&&u<=1)minT=t;
     });
     pts.push({angle,x:px+dx*minT,y:py+dy*minT});
   });
-  pts.sort((a,b)=>a.angle-b.angle); return pts;
+  pts.sort((a,b)=>a.angle-b.angle);return pts;
 }
 
-// ── Level generator ────────────────────────
+// ── Level generator ──────────────────────────
 function generateLevel(){
   const margin=3,cols=Math.floor(MAP_W/TILE),rows=Math.floor(MAP_H/TILE);
   const walls=[],occ=new Set();
   function addW(tx,ty,tw,th){
     walls.push({x:tx*TILE,y:ty*TILE,w:tw*TILE,h:th*TILE});
-    for(let dx=0;dx<tw;dx++) for(let dy=0;dy<th;dy++) occ.add(`${tx+dx},${ty+dy}`);
+    for(let dx=0;dx<tw;dx++)for(let dy=0;dy<th;dy++)occ.add(`${tx+dx},${ty+dy}`);
   }
   [{cx:10,cy:7},{cx:28,cy:7},{cx:10,cy:18},{cx:28,cy:18},{cx:19,cy:12}].forEach(({cx,cy})=>{
     const rw=7,rh=5,rx=cx-3,ry=cy-2;
-    if(rx<2||ry<3||rx+rw>cols-2||ry+rh>rows-2) return;
+    if(rx<2||ry<3||rx+rw>cols-2||ry+rh>rows-2)return;
     addW(rx,ry,3,1);addW(rx+4,ry,3,1);addW(rx,ry+rh-1,3,1);addW(rx+4,ry+rh-1,3,1);
     addW(rx,ry,1,2);addW(rx,ry+3,1,2);addW(rx+rw-1,ry,1,2);addW(rx+rw-1,ry+3,1,2);
   });
@@ -441,8 +503,8 @@ function generateLevel(){
     const ty=3+Math.floor(Math.random()*(rows-5));
     let ok=true;
     for(let i=0;i<len;i++){if(occ.has(h?`${tx+i},${ty}`:`${tx},${ty+i}`)){ok=false;break;}}
-    if(!ok) continue;
-    if(h) addW(tx,ty,len,1); else addW(tx,ty,1,len);
+    if(!ok)continue;
+    if(h)addW(tx,ty,len,1);else addW(tx,ty,1,len);
   }
   const pillars=[];
   for(let a=0;a<200&&pillars.length<10;a++){
@@ -454,10 +516,10 @@ function generateLevel(){
     const tx=2+Math.floor(Math.random()*(cols-4)),ty=3+Math.floor(Math.random()*(rows-5));
     if(!occ.has(`${tx},${ty}`)){occ.add(`${tx},${ty}`);cabinets.push({x:tx*TILE+20,y:ty*TILE+20});}
   }
-  const ep=Math.floor(Math.random()*4); let exit;
-  if(ep===0) exit={x:(8+Math.floor(Math.random()*(cols-12)))*TILE,y:TILE};
-  else if(ep===1) exit={x:(2+Math.floor(Math.random()*(cols-4)))*TILE,y:(rows-2)*TILE};
-  else if(ep===2) exit={x:TILE,y:(4+Math.floor(Math.random()*(rows-6)))*TILE};
+  const ep=Math.floor(Math.random()*4);let exit;
+  if(ep===0)exit={x:(8+Math.floor(Math.random()*(cols-12)))*TILE,y:TILE};
+  else if(ep===1)exit={x:(2+Math.floor(Math.random()*(cols-4)))*TILE,y:(rows-2)*TILE};
+  else if(ep===2)exit={x:TILE,y:(4+Math.floor(Math.random()*(rows-6)))*TILE};
   else exit={x:(cols-2)*TILE,y:(2+Math.floor(Math.random()*(rows-4)))*TILE};
   let key=null;
   for(let a=0;a<300&&!key;a++){
@@ -467,135 +529,123 @@ function generateLevel(){
       occ.add(`${tx},${ty}`);key={x:kx,y:ky};
     }
   }
-  if(!key) key={x:400,y:900};
+  if(!key)key={x:400,y:900};
   return {walls,pillars,cabinets,exit,key,keyCollected:false,exitLocked:true};
 }
 
-// ═══════════════════════════════════════════
-// Scene  — pure top-down physics, oblique look via CSS on #iso-shell
-// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════════
+// Phaser Scene
+// ═══════════════════════════════════════════════
 class GameScene extends Phaser.Scene{
   constructor(){super('GameScene');}
-
   preload(){
     this.textures.addCanvas('player',  drawCat(48));
     this.textures.addCanvas('enemy',   drawZombie(48));
     this.textures.addCanvas('cabinet', drawCabinet(44));
     this.textures.addCanvas('key_tex', drawKeyTex(36));
     this.textures.addCanvas('gun_tex', drawGun(32));
-    this.textures.addCanvas('exit_locked', drawExitTex(48,true));
-    this.textures.addCanvas('exit_open',   drawExitTex(48,false));
+    this.textures.addCanvas('exit_locked',drawExitTex(48,true));
+    this.textures.addCanvas('exit_open',  drawExitTex(48,false));
   }
-
   create(){
-    const lv=generateLevel();
-    this._lv=lv; _mmLevel=lv;
+    const lv=generateLevel(); this._lv=lv; _mmLevel=lv;
     this._segs=buildSegs(lv.walls,lv.pillars);
     resetFog();
 
     this.physics.world.setBounds(0,0,MAP_W,MAP_H);
     this.cameras.main.setBounds(0,0,MAP_W,MAP_H);
-    this.cameras.main.setScroll(MAP_W/2-VIEW_W/2, MAP_H/2-VIEW_H/2);
+    this.cameras.main.setScroll(MAP_W/2-VIEW_W/2,MAP_H/2-VIEW_H/2);
 
-    // ── Floor ──
+    // Background
     const bg=this.add.graphics().setDepth(0);
-    for(let tx=0;tx<MAP_W/TILE;tx++) for(let ty=0;ty<MAP_H/TILE;ty++){
+    for(let tx=0;tx<MAP_W/TILE;tx++)for(let ty=0;ty<MAP_H/TILE;ty++){
       bg.fillStyle((tx+ty)%2===0?0xedf2ed:0xe3eae3,1);
       bg.fillRect(tx*TILE,ty*TILE,TILE,TILE);
     }
     bg.lineStyle(1,0xd0d8d0,.5);
-    for(let x=0;x<=MAP_W;x+=TILE) bg.lineBetween(x,0,x,MAP_H);
-    for(let y=0;y<=MAP_H;y+=TILE) bg.lineBetween(0,y,MAP_W,y);
+    for(let x=0;x<=MAP_W;x+=TILE)bg.lineBetween(x,0,x,MAP_H);
+    for(let y=0;y<=MAP_H;y+=TILE)bg.lineBetween(0,y,MAP_W,y);
 
-    // ── Train ──
-    this._numCars=1;
-    this._tg=this.add.graphics().setDepth(1);
+    // Train
+    this._numCars=1; this._tg=this.add.graphics().setDepth(1);
     drawTrainGfx(this._tg,this._numCars,TRAIN_X,TRAIN_Y,CAR_W,CAR_H,CAR_GAP,LOCO_W);
 
-    // ── Walls (with 3D side drawn below top face) ──
+    // Walls
     this.walls=this.physics.add.staticGroup();
-    const wg=this.add.graphics().setDepth(2);
-    const SIDE=16;
+    const wg=this.add.graphics().setDepth(2); const SIDE=16;
     lv.walls.forEach(w=>{
-      // dark side face
-      wg.fillStyle(0x3a4455,1); wg.fillRect(w.x,w.y+w.h,w.w,SIDE);
-      wg.lineStyle(1,0x556677,.4); wg.lineBetween(w.x,w.y+w.h+SIDE,w.x+w.w,w.y+w.h+SIDE);
-      // top face
-      wg.fillStyle(0x8899aa,1); wg.fillRect(w.x,w.y,w.w,w.h);
-      wg.fillStyle(0xbcccdd,.3); wg.fillRect(w.x+2,w.y+2,w.w-4,Math.min(6,w.h-4));
-      wg.lineStyle(5,0xaaccff,.1); wg.strokeRect(w.x-2,w.y-2,w.w+4,w.h+4);
-      wg.lineStyle(2,0xbbddff,.22); wg.strokeRect(w.x-1,w.y-1,w.w+2,w.h+2);
-      wg.lineStyle(1.5,0xddeeff,.6); wg.strokeRect(w.x,w.y,w.w,w.h);
-      // Slightly inflate collision box to prevent edge tunnelling
-      const bw=w.w<w.h ? w.w+4 : w.w;
-      const bh=w.w<w.h ? w.h : w.h+4;
+      wg.fillStyle(0x3a4455,1);wg.fillRect(w.x,w.y+w.h,w.w,SIDE);
+      wg.fillStyle(0x8899aa,1);wg.fillRect(w.x,w.y,w.w,w.h);
+      wg.fillStyle(0xbcccdd,.3);wg.fillRect(w.x+2,w.y+2,w.w-4,Math.min(6,w.h-4));
+      wg.lineStyle(5,0xaaccff,.1);wg.strokeRect(w.x-2,w.y-2,w.w+4,w.h+4);
+      wg.lineStyle(2,0xbbddff,.22);wg.strokeRect(w.x-1,w.y-1,w.w+2,w.h+2);
+      wg.lineStyle(1.5,0xddeeff,.6);wg.strokeRect(w.x,w.y,w.w,w.h);
+      const bw=w.w<w.h?w.w+4:w.w,bh=w.w<w.h?w.h:w.h+4;
       const b=this.walls.create(w.x+w.w/2,w.y+w.h/2,null);
-      b.setVisible(false); b.body.setSize(bw,bh); b.refreshBody();
+      b.setVisible(false);b.body.setSize(bw,bh);b.refreshBody();
     });
     lv.pillars.forEach(p=>{
       const sz=p.s*2;
-      wg.fillStyle(0x3a4455,1); wg.fillRect(p.x-p.s,p.y+p.s,sz,SIDE);
-      wg.fillStyle(0x667799,1); wg.fillRect(p.x-p.s,p.y-p.s,sz,sz);
-      wg.fillStyle(0x99aacc,.4); wg.fillRect(p.x-p.s+2,p.y-p.s+2,6,6);
-      wg.lineStyle(1.5,0xbbddff,.55); wg.strokeRect(p.x-p.s,p.y-p.s,sz,sz);
+      wg.fillStyle(0x3a4455,1);wg.fillRect(p.x-p.s,p.y+p.s,sz,SIDE);
+      wg.fillStyle(0x667799,1);wg.fillRect(p.x-p.s,p.y-p.s,sz,sz);
+      wg.lineStyle(1.5,0xbbddff,.55);wg.strokeRect(p.x-p.s,p.y-p.s,sz,sz);
       const b=this.walls.create(p.x,p.y,null);
-      b.setVisible(false); b.body.setSize(sz,sz); b.refreshBody();
+      b.setVisible(false);b.body.setSize(sz,sz);b.refreshBody();
     });
 
-    // ── Cabinets ──
+    // Cabinets
     this._cabs=[];
     const cg=this.physics.add.staticGroup();
     lv.cabinets.forEach(c=>{
       const sp=cg.create(c.x,c.y,'cabinet');
       sp.setOrigin(0.5).setDisplaySize(44,73).setDepth(3);
-      sp.body.setSize(36,36); sp.refreshBody();
+      sp.body.setSize(36,36);sp.refreshBody();
       this._cabs.push({sprite:sp,x:c.x,y:c.y});
     });
 
-    // ── Gun ──
-    this._hasGun=false; this._gunUsed=false;
+    // Gun
+    this._hasGun=false;this._gunUsed=false;
     const gi=Math.floor(Math.random()*this._cabs.length);
     const gc=this._cabs[gi];
     this._gunSpr=this.add.image(gc.x,gc.y-26,'gun_tex').setDisplaySize(28,23).setDepth(4).setAlpha(0.9);
     this.tweens.add({targets:this._gunSpr,y:gc.y-30,yoyo:true,repeat:-1,duration:900,ease:'Sine.easeInOut'});
     this._gunZone=new Phaser.Geom.Circle(gc.x,gc.y,CABINET_RADIUS+32);
 
-    // ── Key ──
+    // Key
     this._hasKey=false;
     this._keySpr=this.add.image(lv.key.x,lv.key.y,'key_tex').setDisplaySize(26,43).setDepth(3);
     this.tweens.add({targets:this._keySpr,y:lv.key.y-6,yoyo:true,repeat:-1,duration:700,ease:'Sine.easeInOut'});
     this._keyZone=new Phaser.Geom.Circle(lv.key.x,lv.key.y,26);
 
-    // ── Exit ──
+    // Exit
     this._exitLocked=true;
     const ex=lv.exit;
     this._exitSpr=this.add.image(ex.x,ex.y,'exit_locked').setDisplaySize(44,73).setDepth(3);
     this.tweens.add({targets:this._exitSpr,scaleX:1.12,scaleY:1.12,yoyo:true,repeat:-1,duration:700});
     this._exitZone=new Phaser.Geom.Circle(ex.x,ex.y,28);
 
-    // ── Player ──
+    // Player
     this.player=this.physics.add.sprite(MAP_W/2,MAP_H/2,'player');
     this.player.setDisplaySize(36,60).setCollideWorldBounds(true).setDepth(5);
-    this.player.body.setSize(20,20); this.player.body.setOffset(14,14);
-    this.player.body.setMaxVelocity(PLAYER_SPEED, PLAYER_SPEED);
-
-    // jump state (visual only, _jumpZ shifts sprite up via setOriginY trick)
-    this._jumpZ=0; this._jumpT=0; this._jumping=false;
+    this.player.body.setSize(20,20);this.player.body.setOffset(14,14);
+    this.player.body.setMaxVelocity(PLAYER_SPEED,PLAYER_SPEED);
+    this._jumpZ=0;this._jumpT=0;this._jumping=false;
+    this._jumpGhost=null;
     this._shadow=this.add.graphics().setDepth(4);
 
-    // ── Enemies ──
+    // Enemies
     this.enemies=this.physics.add.group();
-    this._zCount=1; this._spawnZ(0);
+    this._zCount=1;this._spawnZ(0);
 
-    // ── HUD (screen-fixed) ──
+    // HUD text (screen-fixed)
     this._hideBar=this.add.graphics().setDepth(20).setScrollFactor(0);
-    this._ejectTxt=this.add.text(0,0,'',{fontSize:'20px',fontFamily:'Courier New',color:'#e63946',stroke:'#fff',strokeThickness:4}).setOrigin(0.5).setDepth(20).setScrollFactor(0);
-    this.hint=this.add.text(VIEW_W/2,VIEW_H-18,'',{fontSize:'12px',fontFamily:'Courier New',color:'#fff',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(20).setScrollFactor(0);
+    this._ejectTxt=this.add.text(0,0,'',{fontSize:'18px',fontFamily:'Courier New',color:'#e63946',stroke:'#fff',strokeThickness:4}).setOrigin(0.5).setDepth(20).setScrollFactor(0);
 
-    // overlay div
+    // Overlay
     this._ov=document.createElement('div');
-    this._ov.style.cssText='position:absolute;top:0;left:0;width:800px;height:560px;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:50;';
-    document.getElementById('game-wrapper').appendChild(this._ov);
+    this._ov.id='game-overlay';
+    this._ov.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:60;';
+    document.getElementById('shell').appendChild(this._ov);
 
     // Input
     this.keys=this.input.keyboard.addKeys({
@@ -603,8 +653,14 @@ class GameScene extends Phaser.Scene{
       left:Phaser.Input.Keyboard.KeyCodes.A, right:Phaser.Input.Keyboard.KeyCodes.D,
       space:Phaser.Input.Keyboard.KeyCodes.SPACE, f:Phaser.Input.Keyboard.KeyCodes.F,
     });
-    this._spWas=false; this._fWas=false;
-    this.input.on('pointerdown',(p)=>{ if(p.leftButtonDown()) this._shoot(p); });
+    this._spWas=false;this._fWas=false;
+    this.input.on('pointerdown',(p)=>{ if(p.leftButtonDown())this._shootAt(p.x+_camX,p.y+_camY); });
+
+    // Gun slot tap (shoot via item HUD)
+    const gunSlot=document.getElementById('slot-gun');
+    if(gunSlot){
+      gunSlot.onclick=()=>{ if(this._hasGun&&!this._gunUsed){ const px=this.player.x,py=this.player.y; this._shootAt(px+100,py); } };
+    }
 
     // Colliders
     this.physics.add.collider(this.player,this.walls);
@@ -612,164 +668,161 @@ class GameScene extends Phaser.Scene{
     this._zOvlp=this.physics.add.overlap(this.player,this.enemies,this._caught_cb,null,this);
 
     // State
-    this._state='waiting';
-    this._pt=0; this._firstSafe=true;
-    this._hiding=false; this._hideT=0; this._nearCab=null;
-    this._caught=false; this._won=false;
-    this._keyLbl=null; this._gunLbl=null;
-    this._vbShootWas=false;
+    this._state='waiting';this._pt=0;this._firstSafe=true;
+    this._hiding=false;this._hideT=0;this._nearCab=null;
+    this._caught=false;this._won=false;
+    this._keyLbl=null;this._gunLbl=null;this._vbShootWas=false;
 
-    this._showOv('🐱','請選擇遊戲模式<br><br>⌨️ <b>鍵盤</b>：WASD移動・空白跳躍・F躲藏・左鍵射擊<br>📱 <b>手機</b>：觸控點擊移動目標位置<br><br>找到 🔑 鑰匙 → 抵達 EXIT 出口即勝利');
+    this._showOv('🐱','請選擇開始方式<br><br>找到 🔑 鑰匙 → 抵達 EXIT 即勝利');
     this._hudUpdate();
   }
 
-  // camera
   _camUpdate(){
-    const px=this.player.x, py=this.player.y;
-    const cam=this.cameras.main;
-    let cx=cam.scrollX, cy=cam.scrollY;
-    const sx=px-cx, sy=py-cy;
-    if(sx<SCROLL_MARGIN)        cx=px-SCROLL_MARGIN;
-    if(sx>VIEW_W-SCROLL_MARGIN) cx=px-VIEW_W+SCROLL_MARGIN;
-    if(sy<SCROLL_MARGIN)        cy=py-SCROLL_MARGIN;
-    if(sy>VIEW_H-SCROLL_MARGIN) cy=py-VIEW_H+SCROLL_MARGIN;
+    const px=this.player.x,py=this.player.y,cam=this.cameras.main;
+    let cx=cam.scrollX,cy=cam.scrollY;
+    const sx=px-cx,sy=py-cy;
+    if(sx<SCROLL_MARGIN)cx=px-SCROLL_MARGIN;
+    if(sx>VIEW_W-SCROLL_MARGIN)cx=px-VIEW_W+SCROLL_MARGIN;
+    if(sy<SCROLL_MARGIN)cy=py-SCROLL_MARGIN;
+    if(sy>VIEW_H-SCROLL_MARGIN)cy=py-VIEW_H+SCROLL_MARGIN;
     cx=Math.max(0,Math.min(MAP_W-VIEW_W,cx));
     cy=Math.max(0,Math.min(MAP_H-VIEW_H,cy));
-    cam.setScroll(cx,cy); _camX=cx; _camY=cy;
+    cam.setScroll(cx,cy);_camX=cx;_camY=cy;
   }
 
   _showOv(e,m){
-    this._ov.innerHTML=`<div style="background:rgba(0,0,0,0.78);border-radius:16px;padding:28px 40px;text-align:center;color:#fff;font-family:'Courier New',monospace;max-width:480px;"><div style="font-size:60px;margin-bottom:10px;">${e}</div><div style="font-size:14px;line-height:1.9;">${m}</div></div>`;
+    this._ov.innerHTML=`<div style="background:rgba(0,0,0,0.82);border-radius:14px;padding:22px 32px;text-align:center;color:#fff;font-family:'Courier New',monospace;max-width:320px;"><div style="font-size:50px;margin-bottom:8px;">${e}</div><div style="font-size:13px;line-height:1.8;">${m}</div></div>`;
   }
-  _hideOv(){ this._ov.innerHTML=''; }
+  _hideOv(){this._ov.innerHTML='';}
 
   _begin(){
-    if(this._state!=='waiting') return;
+    if(this._state!=='waiting')return;
     this._enterSafe();
   }
   _enterSafe(){
-    this._state='safe'; this._pt=this._firstSafe?FIRST_SAFE:SAFE_DURATION;
-    this._firstSafe=false; this._recallZ(); this._hideOv(); this._hudUpdate();
+    this._state='safe';this._pt=this._firstSafe?FIRST_SAFE:SAFE_DURATION;
+    this._firstSafe=false;this._recallZ();this._hideOv();this._hudUpdate();
   }
   _enterPreHunt(){
-    this._state='pre_hunt'; this._pt=COUNTDOWN_SECS;
+    this._state='pre_hunt';this._pt=COUNTDOWN_SECS;
     if(this._numCars<MAX_TRAIN_CARS){
-      this._numCars++; this._tg.clear();
+      this._numCars++;this._tg.clear();
       drawTrainGfx(this._tg,this._numCars,TRAIN_X,TRAIN_Y,CAR_W,CAR_H,CAR_GAP,LOCO_W);
     }
-    this._zCount++; this._spawnZ(this._numCars-1);
+    this._zCount++;this._spawnZ(this._numCars-1);
     this.enemies.getChildren().forEach(z=>{z._ret=false;});
     this._hudUpdate();
   }
-  _enterHunt(){
-    this._state='hunt'; this._pt=HUNT_DURATION; this._hideOv(); this._hudUpdate();
-  }
+  _enterHunt(){this._state='hunt';this._pt=HUNT_DURATION;this._hideOv();this._hudUpdate();}
+
   _spawnZ(ci){
     const z=this.enemies.create(doorX(Math.min(ci,this._numCars-1)),DOOR_Y+20,'enemy');
     z.setDisplaySize(40,67).setCollideWorldBounds(true).setDepth(5);
-    z.body.setSize(18,18); z.body.setOffset(15,15);
-    z.body.setMaxVelocity(ENEMY_SPEED, ENEMY_SPEED);
-    z._ret=false; z._ci=ci; return z;
+    z.body.setSize(18,18);z.body.setOffset(15,15);
+    z.body.setMaxVelocity(ENEMY_SPEED,ENEMY_SPEED);
+    z._ret=false;z._ci=ci;return z;
   }
   _recallZ(){
     this.enemies.getChildren().forEach((z,i)=>{
-      z._ret=true;
-      z._hx=doorX(Math.min(z._ci||0,this._numCars-1));
-      z._hy=DOOR_Y+20+i*4;
+      z._ret=true;z._hx=doorX(Math.min(z._ci||0,this._numCars-1));z._hy=DOOR_Y+20+i*4;
     });
   }
+
   _hudUpdate(){
     const te=document.getElementById('clock-time');
     const pe=document.getElementById('clock-phase');
     const ce=document.getElementById('zombie-count');
     const be=document.getElementById('clock-box');
-    if(!te) return;
+    if(!te)return;
     ce.textContent='🧟 ×'+this._zCount;
     const fmt=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
-    if(this._state==='waiting'){be.className='grey';pe.textContent='待機中';te.textContent='00:05';}
-    else if(this._state==='safe'){be.className='green';pe.textContent='✓ 安全期';te.textContent=fmt(Math.max(0,Math.ceil(this._pt)));}
-    else if(this._state==='pre_hunt'){be.className='red';pe.textContent='⚠ 即將追捕';te.textContent='準備！';}
-    else if(this._state==='hunt'){be.className='red';pe.textContent='⚠ 追捕中';te.textContent=fmt(Math.max(0,Math.ceil(this._pt)));}
+    const st=this._state;
+    if(st==='waiting'){be.className='grey';pe.textContent='待機中';te.textContent='00:05';}
+    else if(st==='safe'){be.className='green';pe.textContent='✓ 安全期';te.textContent=fmt(Math.max(0,Math.ceil(this._pt)));}
+    else if(st==='pre_hunt'){be.className='red';pe.textContent='⚠ 即將追捕';te.textContent='準備！';}
+    else if(st==='hunt'){be.className='red';pe.textContent='⚠ 追捕中';te.textContent=fmt(Math.max(0,Math.ceil(this._pt)));}
     if(_mmLevel){_mmLevel.exitLocked=this._exitLocked;_mmLevel.keyCollected=this._hasKey;}
   }
   _itemHUD(){
-    const gs=document.getElementById('slot-gun'), ks=document.getElementById('slot-key');
-    if(!gs||!ks) return;
+    const gs=document.getElementById('slot-gun');
+    const ks=document.getElementById('slot-key');
+    if(!gs||!ks)return;
     if(this._hasGun){
-      gs.classList.remove('empty'); gs.classList.add('has-item');
+      gs.classList.remove('empty');gs.classList.add('has-item');
+      if(_mobMode)gs.classList.add('active-btn');
       let b=gs.querySelector('.badge');
       if(!b){b=document.createElement('div');b.className='badge';gs.appendChild(b);}
-      b.textContent=this._gunUsed?'0':'1'; b.style.background=this._gunUsed?'#555':'#e63946';
-    } else {gs.classList.add('empty');gs.classList.remove('has-item');}
+      b.textContent=this._gunUsed?'0':'1';b.style.background=this._gunUsed?'#555':'#e63946';
+    } else {gs.classList.add('empty');gs.classList.remove('has-item','active-btn');}
     if(this._hasKey){ks.classList.remove('empty');ks.classList.add('has-item');}
-    else {ks.classList.add('empty');ks.classList.remove('has-item');}
+    else{ks.classList.add('empty');ks.classList.remove('has-item');}
   }
+
   _caught_cb(){
-    if(this._hiding||this._caught||this._won||this._state!=='hunt') return;
-    this._caught=true; this.physics.pause();
-    this._showOv('😱','被抓了！<br><br><button onclick="resetGame()" style="margin-top:12px;padding:8px 20px;background:#c0392b;color:#fff;border:none;border-radius:8px;font-family:Courier New,monospace;font-size:15px;cursor:pointer;">🔄 重置重玩</button>');
+    if(this._hiding||this._caught||this._won||this._state!=='hunt')return;
+    this._caught=true;this.physics.pause();
+    this._showOv('😱','被抓了！<br><br><button onclick="resetGame()" style="margin-top:10px;padding:7px 18px;background:#c0392b;color:#fff;border:none;border-radius:8px;font-family:\'Courier New\',monospace;font-size:14px;cursor:pointer;">🔄 重置</button>');
     this._ov.style.pointerEvents='auto';
   }
   _eject(){
-    this._hiding=false; this._hideT=0; this.player.setAlpha(1); this._hideBar.clear();
-    const sx=this.player.x-_camX, sy=this.player.y-_camY;
+    this._hiding=false;this._hideT=0;this.player.setAlpha(1);this._hideBar.clear();
+    const sx=this.player.x-_camX,sy=this.player.y-_camY;
     this._ejectTxt.setText('彈出！').setPosition(sx,sy-40);
     this.time.delayedCall(800,()=>{if(this._ejectTxt)this._ejectTxt.setText('');});
     document.getElementById('status-msg').textContent='暴露中';
     document.getElementById('status-msg').className='';
   }
-  _shoot(ptr){
-    if(!this._hasGun||this._gunUsed||this._hiding) return;
-    this._gunUsed=true; this._itemHUD();
-    const wx=ptr.x+_camX, wy=ptr.y+_camY;
-    const px=this.player.x, py=this.player.y;
-    const ang=Math.atan2(wy-py,wx-px), spd=700, dist=900;
+
+  _shootAt(wx,wy){
+    if(!this._hasGun||this._gunUsed||this._hiding)return;
+    this._gunUsed=true;this._itemHUD();
+    const px=this.player.x,py=this.player.y;
+    const ang=Math.atan2(wy-py,wx-px),spd=700,dist=900;
     const bul=this.add.graphics().setDepth(8);
-    bul.fillStyle(0xffee33,1); bul.fillCircle(0,0,5); bul.x=px; bul.y=py;
+    bul.fillStyle(0xffee33,1);bul.fillCircle(0,0,5);bul.x=px;bul.y=py;
     const fl=this.add.graphics().setDepth(9);
-    fl.fillStyle(0xffffff,1); fl.fillCircle(px,py,11);
+    fl.fillStyle(0xffffff,1);fl.fillCircle(px,py,11);
     this.time.delayedCall(55,()=>fl.destroy());
     this.tweens.add({targets:bul,x:px+Math.cos(ang)*dist,y:py+Math.sin(ang)*dist,duration:(dist/spd)*1000,
       onUpdate:()=>{
         this.enemies.getChildren().forEach(z=>{
-          if(!z.active) return;
+          if(!z.active)return;
           if(Phaser.Math.Distance.Between(bul.x,bul.y,z.x,z.y)<22){
-            z._ret=true; z._hx=doorX(Math.min(z._ci||0,this._numCars-1)); z._hy=DOOR_Y+20;
+            z._ret=true;z._hx=doorX(Math.min(z._ci||0,this._numCars-1));z._hy=DOOR_Y+20;
             const h=this.add.text(z.x,z.y-18,'💥',{fontSize:'22px'}).setOrigin(0.5).setDepth(8);
             this.tweens.add({targets:h,y:z.y-50,alpha:0,duration:700,onComplete:()=>h.destroy()});
-            if(bul.active) bul.destroy();
+            if(bul.active)bul.destroy();
           }
         });
       },
-      onComplete:()=>{if(bul.active) bul.destroy();}
+      onComplete:()=>{if(bul.active)bul.destroy();}
     });
   }
 
   update(time,delta){
-    if(this._caught||this._won) return;
+    if(this._caught||this._won)return;
     this._camUpdate();
-    const px=this.player.x, py=this.player.y;
+    const px=this.player.x,py=this.player.y;
     const pts=castVision(px,py,this._segs,VISION_RADIUS);
     paintFog(px,py,pts);
     paintMinimap(px,py);
 
-    if(this._state==='waiting') return;
+    if(this._state==='waiting')return;
     const dt=delta/1000;
+    this._pt-=dt;this._hudUpdate();
 
-    // Phase
-    this._pt-=dt; this._hudUpdate();
-    if(this._state==='safe'&&this._pt<=0){ this._enterPreHunt(); }
+    if(this._state==='safe'&&this._pt<=0){this._enterPreHunt();}
     else if(this._state==='pre_hunt'){
       const r=Math.ceil(Math.max(0,this._pt));
-      this._showOv(`<span style="font-size:96px;color:#e63946;">${r}</span>`,'殭屍即將衝出！快躲好！');
-      if(this._pt<=0) this._enterHunt();
-    } else if(this._state==='hunt'&&this._pt<=0){ this._enterSafe(); }
+      this._showOv(`<span style="font-size:86px;color:#e63946;">${r}</span>`,'殭屍即將衝出！');
+      if(this._pt<=0)this._enterHunt();
+    } else if(this._state==='hunt'&&this._pt<=0){this._enterSafe();}
 
     const {up,down,left,right,space,f}=this.keys;
-    const sx=px-_camX, sy=py-_camY;
+    const sx=px-_camX,sy=py-_camY;
 
     // Cabinet proximity
-    let nc=null, nd=Infinity;
+    let nc=null,nd=Infinity;
     this._cabs.forEach(c=>{
       const d=Phaser.Math.Distance.Between(px,py,c.x,c.y);
       if(d<CABINET_RADIUS+32&&d<nd){nd=d;nc=c;}
@@ -781,46 +834,36 @@ class GameScene extends Phaser.Scene{
       this._hideT+=dt;
       const pct=Math.max(0,1-this._hideT/CABINET_HIDE_MAX);
       this._hideBar.clear();
-      this._hideBar.fillStyle(0x000000,.55); this._hideBar.fillRect(sx-22,sy-44,44,7);
-      this._hideBar.fillStyle(pct>.4?0x50c878:0xe63946,1); this._hideBar.fillRect(sx-22,sy-44,44*pct,7);
-      if(this._hideT>=CABINET_HIDE_MAX) this._eject();
-    } else { this._hideBar.clear(); }
+      this._hideBar.fillStyle(0x000000,.55);this._hideBar.fillRect(sx-22,sy-44,44,7);
+      this._hideBar.fillStyle(pct>.4?0x50c878:0xe63946,1);this._hideBar.fillRect(sx-22,sy-44,44*pct,7);
+      if(this._hideT>=CABINET_HIDE_MAX)this._eject();
+    } else {this._hideBar.clear();}
 
-    // SPACE = jump (or virtual jump button)
+    // Jump
     const spDown=space.isDown||_vbJump;
     if(spDown&&!this._spWas&&!this._hiding&&!this._jumping){
-      this._jumping=true; this._jumpT=0;
+      this._jumping=true;this._jumpT=0;
       this.physics.world.removeCollider(this._zOvlp);
     }
     this._spWas=spDown;
-
     if(this._jumping){
-      this._jumpT+=dt;
-      const t=this._jumpT/0.42;
+      this._jumpT+=dt;const t=this._jumpT/0.42;
       if(t>=1){
-        this._jumping=false; this._jumpZ=0;
-        this.player.setDisplaySize(36,60);
-        this._shadow.clear();
+        this._jumping=false;this._jumpZ=0;
+        this.player.setDisplaySize(36,60);this._shadow.clear();
         this._zOvlp=this.physics.add.overlap(this.player,this.enemies,this._caught_cb,null,this);
       } else {
         this._jumpZ=Math.sin(t*Math.PI)*44;
         const sc=1+Math.sin(t*Math.PI)*.2;
         this.player.setDisplaySize(36*sc,60*sc);
         this._shadow.clear();
-        const h2=Math.sin(t*Math.PI), sr=14*(1-h2*.5);
+        const h2=Math.sin(t*Math.PI),sr=14*(1-h2*.5);
         this._shadow.fillStyle(0x000000,.2*(1-h2*.6));
         this._shadow.fillEllipse(px,py+10,sr*2,sr*.4);
       }
-    } else { this._jumpZ=0; this._shadow.clear(); }
+    } else {this._jumpZ=0;}
 
-    // Apply jump: offset player's render position (y-jumpZ), restore body
-    // We use setY on sprite but then sync body manually next frame via preUpdate
-    // SAFEST: set origin offset instead of touching .y
-    // Actually: just set y = body center y - jumpZ each frame, then on next frame
-    // physics resets body to sprite position... this is the same loop!
-    // REAL FIX: Don't call setY. Instead render a visual "jump ghost" sprite.
     if(this._jumping){
-      // Move a visual ghost up; keep physics player invisible
       if(!this._jumpGhost){
         this._jumpGhost=this.add.image(px,py,'player').setDisplaySize(36,60).setDepth(6);
         this.player.setAlpha(0);
@@ -829,303 +872,290 @@ class GameScene extends Phaser.Scene{
       this._jumpGhost.setPosition(px,py-this._jumpZ).setDisplaySize(36*sc2,60*sc2);
       this._jumpGhost.setFlipX(this.player.flipX);
     } else {
-      if(this._jumpGhost){ this._jumpGhost.destroy(); this._jumpGhost=null; }
-      if(!this._hiding) this.player.setAlpha(1);
+      if(this._jumpGhost){this._jumpGhost.destroy();this._jumpGhost=null;}
+      if(!this._hiding)this.player.setAlpha(1);
     }
 
-    // F = cabinet (or virtual hide button)
+    // Hide/F
     const fDown=f.isDown||_vbHide;
     if(fDown&&!this._fWas){
       if(this._nearCab&&!this._hiding&&!this._jumping){
-        this._hiding=true; this._hideT=0; this.player.setAlpha(0.12);
+        this._hiding=true;this._hideT=0;this.player.setAlpha(0.12);
         document.getElementById('status-msg').textContent='躲在櫃子裡';
         document.getElementById('status-msg').className='hiding';
-      } else if(this._hiding){ this._eject(); }
+      } else if(this._hiding){this._eject();}
     }
     this._fWas=fDown;
 
-    // Movement — keyboard OR virtual joystick
+    // Movement
     if(!this._hiding){
       let vx=0,vy=0;
-      if(left.isDown)  vx=-PLAYER_SPEED;
-      if(right.isDown) vx= PLAYER_SPEED;
-      if(up.isDown)    vy=-PLAYER_SPEED;
-      if(down.isDown)  vy= PLAYER_SPEED;
-      // Virtual joystick (overrides keyboard if active)
+      if(left.isDown)vx=-PLAYER_SPEED;if(right.isDown)vx=PLAYER_SPEED;
+      if(up.isDown)  vy=-PLAYER_SPEED;if(down.isDown) vy=PLAYER_SPEED;
       if(_vjActive){
         const dead=0.15;
-        if(Math.abs(_vjX)>dead||Math.abs(_vjY)>dead){
-          vx=_vjX*PLAYER_SPEED; vy=_vjY*PLAYER_SPEED;
-        }
+        if(Math.abs(_vjX)>dead||Math.abs(_vjY)>dead){vx=_vjX*PLAYER_SPEED;vy=_vjY*PLAYER_SPEED;}
       }
       if(vx&&vy){vx*=0.707;vy*=0.707;}
       this.player.setVelocity(vx,vy);
-      if(vx<0) this.player.setFlipX(true); else if(vx>0) this.player.setFlipX(false);
-    } else { this.player.setVelocity(0,0); }
+      if(vx<0)this.player.setFlipX(true);else if(vx>0)this.player.setFlipX(false);
+    } else {this.player.setVelocity(0,0);}
 
-    // Move item labels (screen-fixed)
-    if(this._keyLbl) this._keyLbl.setPosition(sx+9,sy-24);
-    if(this._gunLbl) this._gunLbl.setPosition(sx-9,sy-24);
+    // Item labels
+    if(this._keyLbl)this._keyLbl.setPosition(sx+9,sy-24);
+    if(this._gunLbl)this._gunLbl.setPosition(sx-9,sy-24);
+
+    // Virtual shoot (nearest enemy)
+    if(_vbShoot&&!this._vbShootWas){
+      let tx=this.player.x+100,ty=this.player.y,minD=Infinity;
+      this.enemies.getChildren().forEach(z=>{
+        const d=Phaser.Math.Distance.Between(this.player.x,this.player.y,z.x,z.y);
+        if(d<minD){minD=d;tx=z.x;ty=z.y;}
+      });
+      this._shootAt(tx,ty);
+    }
+    this._vbShootWas=_vbShoot;
 
     // Gun pickup
     if(!this._hasGun&&this._gunSpr&&this._gunSpr.active&&Phaser.Geom.Circle.Contains(this._gunZone,px,py)){
-      this._hasGun=true; this._gunSpr.destroy(); this._gunSpr=null; this._itemHUD();
+      this._hasGun=true;this._gunSpr.destroy();this._gunSpr=null;this._itemHUD();
       const gb=this.add.graphics().setDepth(25).setScrollFactor(0);
-      gb.fillStyle(0x000000,.72); gb.fillRoundedRect(VIEW_W/2-155,VIEW_H/2-34,310,60,12);
-      gb.lineStyle(2,0xaaaaaa,.9); gb.strokeRoundedRect(VIEW_W/2-155,VIEW_H/2-34,310,60,12);
-      const gm=this.add.text(VIEW_W/2,VIEW_H/2-4,'🔫  撿到手槍！(1發子彈)',{fontSize:'20px',fontFamily:'Courier New',color:'#fff',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(26).setScrollFactor(0);
+      gb.fillStyle(0x000000,.75);gb.fillRoundedRect(VIEW_W/2-140,VIEW_H/2-28,280,56,10);
+      gb.lineStyle(2,0xaaa,.9);gb.strokeRoundedRect(VIEW_W/2-140,VIEW_H/2-28,280,56,10);
+      const gm=this.add.text(VIEW_W/2,VIEW_H/2-0,'🔫 撿到手槍！',{fontSize:'18px',fontFamily:'Courier New',color:'#fff',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(26).setScrollFactor(0);
       this.tweens.add({targets:[gm,gb],alpha:0,delay:1400,duration:600,onComplete:()=>{gm.destroy();gb.destroy();}});
       this._gunLbl=this.add.text(sx-9,sy-24,'🔫',{fontSize:'14px'}).setOrigin(0.5,1).setDepth(20).setScrollFactor(0);
     }
 
     // Key pickup
     if(!this._hasKey&&Phaser.Geom.Circle.Contains(this._keyZone,px,py)){
-      this._hasKey=true; this._keySpr.destroy();
-      this._exitLocked=false; this._exitSpr.setTexture('exit_open');
-      this._hudUpdate(); this._itemHUD();
+      this._hasKey=true;this._keySpr.destroy();
+      this._exitLocked=false;this._exitSpr.setTexture('exit_open');
+      this._hudUpdate();this._itemHUD();
       const bb=this.add.graphics().setDepth(25).setScrollFactor(0);
-      bb.fillStyle(0x000000,.72); bb.fillRoundedRect(VIEW_W/2-165,VIEW_H/2-34,330,60,12);
-      bb.lineStyle(2,0xFFD700,.9); bb.strokeRoundedRect(VIEW_W/2-165,VIEW_H/2-34,330,60,12);
-      const bm=this.add.text(VIEW_W/2,VIEW_H/2-4,'🔑  取得鑰匙！出口已解鎖',{fontSize:'22px',fontFamily:'Courier New',color:'#FFD700',stroke:'#000',strokeThickness:4}).setOrigin(0.5).setDepth(26).setScrollFactor(0);
+      bb.fillStyle(0x000000,.75);bb.fillRoundedRect(VIEW_W/2-150,VIEW_H/2-28,300,56,10);
+      bb.lineStyle(2,0xFFD700,.9);bb.strokeRoundedRect(VIEW_W/2-150,VIEW_H/2-28,300,56,10);
+      const bm=this.add.text(VIEW_W/2,VIEW_H/2,'🔑 取得鑰匙！出口已解鎖',{fontSize:'17px',fontFamily:'Courier New',color:'#FFD700',stroke:'#000',strokeThickness:3}).setOrigin(0.5).setDepth(26).setScrollFactor(0);
       this.tweens.add({targets:[bm,bb],alpha:0,delay:1400,duration:600,onComplete:()=>{bm.destroy();bb.destroy();}});
       this._keyLbl=this.add.text(sx+9,sy-24,'🔑',{fontSize:'14px'}).setOrigin(0.5,1).setDepth(20).setScrollFactor(0);
     }
 
     // Exit
     if(!this._exitLocked&&Phaser.Geom.Circle.Contains(this._exitZone,px,py)){
-      this._won=true; this.physics.pause();
-      this._showOv('🎉','逃脫成功！<br><br><button onclick="resetGame()" style="margin-top:12px;padding:8px 20px;background:#27ae60;color:#fff;border:none;border-radius:8px;font-family:Courier New,monospace;font-size:15px;cursor:pointer;">🔄 再玩一局</button>');
+      this._won=true;this.physics.pause();
+      this._showOv('🎉','逃脫成功！<br><br><button onclick="resetGame()" style="margin-top:10px;padding:7px 18px;background:#27ae60;color:#fff;border:none;border-radius:8px;font-family:\'Courier New\',monospace;font-size:14px;cursor:pointer;">🔄 再玩</button>');
       this._ov.style.pointerEvents='auto';
     }
 
     // Enemy AI
     this.enemies.getChildren().forEach(z=>{
       if(z._ret){
-        const hx=z._hx||doorX(0), hy=z._hy||DOOR_Y+20;
+        const hx=z._hx||doorX(0),hy=z._hy||DOOR_Y+20;
         const d=Phaser.Math.Distance.Between(z.x,z.y,hx,hy);
-        if(d>5){ const a=Phaser.Math.Angle.Between(z.x,z.y,hx,hy); z.setVelocity(Math.cos(a)*ENEMY_SPEED*.8,Math.sin(a)*ENEMY_SPEED*.8); z.setFlipX(Math.cos(a)<0); }
-        else { z.setVelocity(0,0); z.setPosition(hx,hy); }
+        if(d>5){const a=Phaser.Math.Angle.Between(z.x,z.y,hx,hy);z.setVelocity(Math.cos(a)*ENEMY_SPEED*.8,Math.sin(a)*ENEMY_SPEED*.8);z.setFlipX(Math.cos(a)<0);}
+        else{z.setVelocity(0,0);z.setPosition(hx,hy);}
       } else if(this._state==='hunt'){
-        if(!this._hiding){ const a=Phaser.Math.Angle.Between(z.x,z.y,px,py); z.setVelocity(Math.cos(a)*ENEMY_SPEED,Math.sin(a)*ENEMY_SPEED); z.setFlipX(Math.cos(a)<0); }
-        else { z.setVelocity(z.body.velocity.x*.92,z.body.velocity.y*.92); }
-      } else if(this._state==='pre_hunt'){ z.setVelocity(z.body.velocity.x*.8,z.body.velocity.y*.8); }
-      else { z.setVelocity(z.body.velocity.x*.9,z.body.velocity.y*.9); }
+        if(!this._hiding){const a=Phaser.Math.Angle.Between(z.x,z.y,px,py);z.setVelocity(Math.cos(a)*ENEMY_SPEED,Math.sin(a)*ENEMY_SPEED);z.setFlipX(Math.cos(a)<0);}
+        else{z.setVelocity(z.body.velocity.x*.92,z.body.velocity.y*.92);}
+      } else if(this._state==='pre_hunt'){z.setVelocity(z.body.velocity.x*.8,z.body.velocity.y*.8);}
+      else{z.setVelocity(z.body.velocity.x*.9,z.body.velocity.y*.9);}
     });
 
-    // Virtual shoot button (mobile mode)
-    if(_vbShoot&&!this._vbShootWas){
-      // Fire toward nearest enemy, or forward if none
-      let tx=px+100, ty=py;
-      let minD=Infinity;
-      this.enemies.getChildren().forEach(z=>{
-        const d=Phaser.Math.Distance.Between(px,py,z.x,z.y);
-        if(d<minD){ minD=d; tx=z.x; ty=z.y; }
-      });
-      this._shoot({x:tx-_camX, y:ty-_camY, leftButtonDown:()=>true});
-    }
-    this._vbShootWas=_vbShoot;
-
     // Hints
+    const hint=document.getElementById('hint-text');
+    if(!hint)return;
     const atEx=Phaser.Geom.Circle.Contains(this._exitZone,px,py);
     const atGun=this._gunSpr&&this._gunSpr.active&&Phaser.Geom.Circle.Contains(this._gunZone,px,py);
-    if(atEx&&this._exitLocked) this.hint.setText('需要 🔑 鑰匙才能開門！');
-    else if(atGun&&!this._hasGun) this.hint.setText('走近自動撿起手槍！');
-    else if(this._nearCab&&!this._hiding) this.hint.setText(_mobMode?'[🚪] 躲入櫃子':'[F] 躲入櫃子（最多5秒）');
-    else if(this._hiding) this.hint.setText(_mobMode?'[🚪] 離開櫃子':'[F] 離開櫃子');
-    else this.hint.setText('');
+    if(atEx&&this._exitLocked)hint.textContent='需要 🔑 才能開門！';
+    else if(atGun&&!this._hasGun)hint.textContent='走近自動撿起手槍！';
+    else if(this._nearCab&&!this._hiding)hint.textContent=_mobMode?'🚪 躲入櫃子（最多5秒）':'[F] 躲入櫃子（最多5秒）';
+    else if(this._hiding)hint.textContent=_mobMode?'🚪 離開櫃子':'[F] 離開櫃子';
+    else hint.textContent='';
   }
 }
 
-// ═══════════════════════════════════════════
-// Virtual input state — read by Phaser update()
-// ═══════════════════════════════════════════
-let _vjX=0, _vjY=0, _vjActive=false;
-let _vbJump=false, _vbHide=false, _vbShoot=false;
+// ═══════════════════════════════════════════════
+// Virtual input state
+// ═══════════════════════════════════════════════
+let _vjX=0,_vjY=0,_vjActive=false;
+let _vbJump=false,_vbHide=false,_vbShoot=false;
 let _mobMode=false;
+let _selectedRes=null;
+let game=null;
 
-// ── Joystick ──
 function _initVpad(){
+  const old=document.getElementById('vpad-canvas');
+  if(!old)return;
+  const fresh=old.cloneNode(true);
+  old.parentNode.replaceChild(fresh,old);
   const canvas=document.getElementById('vpad-canvas');
-  if(!canvas) return;
-  // Remove old listeners by replacing canvas with a clone
-  const fresh=canvas.cloneNode(true);
-  canvas.parentNode.replaceChild(fresh,canvas);
-  const canvas2=document.getElementById('vpad-canvas'); // re-get after replace
-  const ctx=canvas2.getContext('2d');
-  const R=60, CX=75, CY=75;
-  let stickX=CX, stickY=CY, active=false, pid=null;
+  const ctx=canvas.getContext('2d');
+  const R=50,CX=65,CY=65;
+  let stickX=CX,stickY=CY,active=false,pid=null;
 
   function draw(){
-    ctx.clearRect(0,0,150,150);
-    // Outer ring
-    ctx.beginPath(); ctx.arc(CX,CY,R,0,Math.PI*2);
+    ctx.clearRect(0,0,130,130);
+    ctx.beginPath();ctx.arc(CX,CY,R,0,Math.PI*2);
     ctx.strokeStyle=active?'rgba(160,200,255,0.8)':'rgba(160,200,255,0.35)';
-    ctx.lineWidth=3; ctx.stroke();
-    ctx.fillStyle=active?'rgba(80,120,200,0.25)':'rgba(60,90,160,0.12)'; ctx.fill();
-    // Arrows
+    ctx.lineWidth=3;ctx.stroke();
+    ctx.fillStyle=active?'rgba(80,120,200,0.25)':'rgba(60,90,160,0.12)';ctx.fill();
     [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dx,dy])=>{
-      const ax=CX+dx*(R-14), ay=CY+dy*(R-14);
-      ctx.beginPath();
-      ctx.moveTo(ax+dy*7, ay-dx*7);
-      ctx.lineTo(ax-dy*7, ay+dx*7);
-      ctx.lineTo(ax+dx*8, ay+dy*8);
-      ctx.closePath();
-      ctx.fillStyle='rgba(180,210,255,0.4)'; ctx.fill();
+      const ax=CX+dx*(R-12),ay=CY+dy*(R-12);
+      ctx.beginPath();ctx.moveTo(ax+dy*6,ay-dx*6);ctx.lineTo(ax-dy*6,ay+dx*6);ctx.lineTo(ax+dx*8,ay+dy*8);
+      ctx.closePath();ctx.fillStyle='rgba(180,210,255,0.4)';ctx.fill();
     });
-    // Knob
-    const kg=ctx.createRadialGradient(stickX-3,stickY-3,2,stickX,stickY,20);
-    kg.addColorStop(0,'rgba(180,200,255,0.95)');
-    kg.addColorStop(1,'rgba(60,90,200,0.75)');
-    ctx.beginPath(); ctx.arc(stickX,stickY,20,0,Math.PI*2);
-    ctx.fillStyle=kg; ctx.fill();
-    ctx.strokeStyle='rgba(200,220,255,0.6)'; ctx.lineWidth=2; ctx.stroke();
+    const kg=ctx.createRadialGradient(stickX-2,stickY-2,1,stickX,stickY,18);
+    kg.addColorStop(0,'rgba(180,200,255,0.95)');kg.addColorStop(1,'rgba(60,90,200,0.75)');
+    ctx.beginPath();ctx.arc(stickX,stickY,18,0,Math.PI*2);
+    ctx.fillStyle=kg;ctx.fill();
+    ctx.strokeStyle='rgba(200,220,255,0.6)';ctx.lineWidth=2;ctx.stroke();
   }
+  function move(cx2,cy2){
+    const rect=canvas.getBoundingClientRect();
+    const scX=rect.width>0?canvas.width/rect.width:1,scY=rect.height>0?canvas.height/rect.height:1;
+    const lx=(cx2-rect.left)*scX-CX,ly=(cy2-rect.top)*scY-CY;
+    const dist=Math.sqrt(lx*lx+ly*ly),clamp=Math.min(dist,R-3);
+    const nx=dist>0?lx/dist:0,ny=dist>0?ly/dist:0;
+    stickX=CX+nx*clamp;stickY=CY+ny*clamp;
+    _vjX=nx*(clamp/(R-3));_vjY=ny*(clamp/(R-3));_vjActive=true;draw();
+  }
+  function release(){active=false;pid=null;_vjX=0;_vjY=0;_vjActive=false;stickX=CX;stickY=CY;draw();}
 
-  function move(cx,cy){
-    // getBoundingClientRect can be zero if canvas not yet painted; use offsetWidth fallback
-    const rect=canvas2.getBoundingClientRect();
-    const scaleX=rect.width>0 ? canvas2.width/rect.width : 1;
-    const scaleY=rect.height>0 ? canvas2.height/rect.height : 1;
-    const lx=(cx-rect.left)*scaleX-CX;
-    const ly=(cy-rect.top)*scaleY-CY;
-    const dist=Math.sqrt(lx*lx+ly*ly);
-    const clamp=Math.min(dist,R-4);
-    const nx=dist>0?lx/dist:0, ny=dist>0?ly/dist:0;
-    stickX=CX+nx*clamp; stickY=CY+ny*clamp;
-    _vjX=nx*(clamp/(R-4)); _vjY=ny*(clamp/(R-4));
-    _vjActive=true;
-    draw();
-  }
-  function release(){
-    active=false; pid=null; _vjX=0; _vjY=0; _vjActive=false;
-    stickX=CX; stickY=CY; draw();
-  }
-
-  canvas2.addEventListener('touchstart',e=>{
-    e.preventDefault();
-    if(pid!==null) return;
-    const t=e.changedTouches[0]; pid=t.identifier; active=true; _vjActive=true;
-    move(t.clientX,t.clientY);
-  },{passive:false});
-  canvas2.addEventListener('touchmove',e=>{
-    e.preventDefault();
-    for(const t of e.changedTouches) if(t.identifier===pid){ move(t.clientX,t.clientY); break; }
-  },{passive:false});
-  canvas2.addEventListener('touchend',e=>{
-    e.preventDefault();
-    for(const t of e.changedTouches) if(t.identifier===pid){ release(); break; }
-  },{passive:false});
-  canvas2.addEventListener('mousedown',e=>{ active=true; _vjActive=true; move(e.clientX,e.clientY); });
-  // Store mouse handlers so we can remove on next init
-  if(window._vpadMouseMove) window.removeEventListener('mousemove',window._vpadMouseMove);
-  if(window._vpadMouseUp)   window.removeEventListener('mouseup',  window._vpadMouseUp);
-  window._vpadMouseMove=e=>{ if(active) move(e.clientX,e.clientY); };
-  window._vpadMouseUp  =()=>{ if(active) release(); };
-  window.addEventListener('mousemove',window._vpadMouseMove);
-  window.addEventListener('mouseup',  window._vpadMouseUp);
+  canvas.addEventListener('touchstart',e=>{e.preventDefault();if(pid!==null)return;const t=e.changedTouches[0];pid=t.identifier;active=true;move(t.clientX,t.clientY);},{passive:false});
+  canvas.addEventListener('touchmove', e=>{e.preventDefault();for(const t of e.changedTouches)if(t.identifier===pid){move(t.clientX,t.clientY);break;}},{passive:false});
+  canvas.addEventListener('touchend',  e=>{e.preventDefault();for(const t of e.changedTouches)if(t.identifier===pid){release();break;}},{passive:false});
+  canvas.addEventListener('mousedown',e=>{active=true;move(e.clientX,e.clientY);});
+  if(window._vpadMM)window.removeEventListener('mousemove',window._vpadMM);
+  if(window._vpadMU)window.removeEventListener('mouseup',window._vpadMU);
+  window._vpadMM=e=>{if(active)move(e.clientX,e.clientY);};
+  window._vpadMU=()=>{if(active)release();};
+  window.addEventListener('mousemove',window._vpadMM);
+  window.addEventListener('mouseup',  window._vpadMU);
   draw();
 }
 
-// ── Action buttons ──
-function _setupVBtn(id, setOn, setOff){
-  const old=document.getElementById(id);
-  if(!old) return;
-  // Clone to remove all old event listeners
-  const el=old.cloneNode(true);
-  old.parentNode.replaceChild(el,old);
-  const on =e=>{ e.preventDefault(); el.classList.add('pressed'); setOn(); };
-  const off=e=>{ e.preventDefault(); el.classList.remove('pressed'); setOff(); };
-  el.addEventListener('touchstart', on, {passive:false});
-  el.addEventListener('touchend',   off,{passive:false});
+function _setupVBtn(id,setOn,setOff){
+  const old=document.getElementById(id);if(!old)return;
+  const el=old.cloneNode(true);old.parentNode.replaceChild(el,old);
+  const on =e=>{e.preventDefault();el.classList.add('pressed');setOn();};
+  const off=e=>{e.preventDefault();el.classList.remove('pressed');setOff();};
+  el.addEventListener('touchstart',on,{passive:false});
+  el.addEventListener('touchend',  off,{passive:false});
   el.addEventListener('touchcancel',off,{passive:false});
-  el.addEventListener('mousedown', on);
-  el.addEventListener('mouseup',   off);
+  el.addEventListener('mousedown',on);
+  el.addEventListener('mouseup',  off);
   el.addEventListener('mouseleave',off);
 }
 
-function _initVbtns(){
-  _setupVBtn('vbtn-jump', ()=>_vbJump=true,  ()=>_vbJump=false);
-  _setupVBtn('vbtn-hide', ()=>_vbHide=true,  ()=>_vbHide=false);
-  _setupVBtn('vbtn-shoot',()=>_vbShoot=true, ()=>_vbShoot=false);
+// ── Mode picker ──────────────────────────────
+function selectRes(res){
+  _selectedRes=res;
+  document.getElementById('btn-resA').classList.toggle('sel',res==='A');
+  document.getElementById('btn-resB').classList.toggle('sel',res==='B');
+  document.getElementById('btn-kb').disabled=false;
+  document.getElementById('btn-mob').disabled=false;
 }
 
-// Called from startGame('mob')
-function _initMobControls(){
-  _initVpad();
-  _initVbtns();
-}
+function launch(inputMode){
+  if(!_selectedRes)return;
+  LAY=LAYOUTS[_selectedRes];
+  VIEW_W=LAY.gameW; VIEW_H=LAY.gameH;
 
-// Prevent Safari from scrolling the page when touching the game area
-document.addEventListener('DOMContentLoaded',function(){
-  const gw=document.getElementById('game-wrapper');
-  if(gw){
-    // Only prevent default when NOT touching a button/input element
-    // This allows HUD buttons to receive touch events normally
-    function shouldPrevent(e){
-      const t=e.target;
-      return !(t.tagName==='BUTTON'||t.tagName==='INPUT'||t.tagName==='A'||t.closest('button'));
-    }
-    gw.addEventListener('touchstart',e=>{ if(shouldPrevent(e)) e.preventDefault(); },{passive:false});
-    gw.addEventListener('touchmove', e=>e.preventDefault(),{passive:false});
-    gw.addEventListener('touchend',  e=>{ if(shouldPrevent(e)) e.preventDefault(); },{passive:false});
-  }
-  document.body.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
-});
+  // Apply body class
+  document.body.classList.remove('resA','resB');
+  document.body.classList.add('res'+_selectedRes);
+  _mobMode=(inputMode==='mob');
+  if(_mobMode) document.body.classList.add('mob-mode');
+  else          document.body.classList.remove('mob-mode');
 
-const config={
-  type:Phaser.CANVAS,
-  width:VIEW_W, height:VIEW_H,
-  parent:'game-container',
-  backgroundColor:'#edf2ed',
-  physics:{default:'arcade',arcade:{gravity:{y:0},debug:false,fixedStep:true,fps:240,tileBias:32}},
-  scene:GameScene,
-};
-let game=new Phaser.Game(config);
-function startGame(mode){
-  const sc=game.scene.getScene('GameScene');
-  if(!sc || !sc._begin){ setTimeout(()=>startGame(mode),100); return; }
-  document.getElementById('start-kb-btn').disabled=true;
-  document.getElementById('start-mob-btn').disabled=true;
-  _mobMode=(mode==='mob');
+  // Size the shell and iso-shell
+  const shell=document.getElementById('shell');
+  shell.style.width =LAY.totalW+'px';
+  shell.style.height=LAY.totalH+'px';
+  const iso=document.getElementById('iso-shell');
+  iso.style.width =VIEW_W+'px';
+  iso.style.height=VIEW_H+'px';
+
+  // Info panel position handled by CSS (resA/resB classes)
+  // Minimap size
+  initMinimap();
+
+  // Hide picker, show shell
+  document.getElementById('mode-picker').style.display='none';
+  shell.style.display='block';
+
+  // Init fog
+  initFogCanvases();
+
+  // Touch prevention on shell
+  shell.addEventListener('touchstart',e=>{
+    const t=e.target;
+    if(!(t.tagName==='BUTTON'||t.closest('button')||t.closest('.item-slot')))
+      e.preventDefault();
+  },{passive:false,capture:false});
+  shell.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+
+  // Create Phaser
+  const config={
+    type:Phaser.CANVAS,
+    width:VIEW_W,height:VIEW_H,
+    parent:'game-container',
+    backgroundColor:'#edf2ed',
+    physics:{default:'arcade',arcade:{gravity:{y:0},debug:false,fixedStep:true,fps:240,tileBias:32}},
+    scene:GameScene,
+  };
+  game=new Phaser.Game(config);
+
+  // Init mob controls after 2 frames
   if(_mobMode){
-    // Add class first so elements become visible (display:block),
-    // then init after one animation frame so layout is calculated
-    document.body.classList.add('mob-mode');
     requestAnimationFrame(()=>requestAnimationFrame(()=>{
-      _initMobControls();
+      _initVpad();
+      _setupVBtn('vbtn-jump',()=>_vbJump=true,()=>_vbJump=false);
+      _setupVBtn('vbtn-hide',()=>_vbHide=true,()=>_vbHide=false);
+      // vbtn-shoot removed: gun slot in item-hud is the shoot button
     }));
-  } else {
-    document.body.classList.remove('mob-mode');
   }
-  sc._begin();
+
+  // Start game after scene ready
+  setTimeout(()=>{
+    const sc=game.scene.getScene('GameScene');
+    if(sc&&sc._begin)sc._begin();
+  },600);
 }
+
 function resetGame(){
-  _mobMode=false; _vjX=0; _vjY=0; _vjActive=false;
-  _vbJump=false; _vbHide=false; _vbShoot=false;
-  document.body.classList.remove('mob-mode');
-  resetFog(); _mmLevel=null;
-  mmCtx.fillStyle='#000'; mmCtx.fillRect(0,0,MM_W,MM_H);
-  ['status-msg','clock-phase','clock-time','zombie-count','clock-box'].forEach(id=>{
-    const el=document.getElementById(id); if(!el) return;
-    if(id==='status-msg'){el.textContent='等待開始';el.className='';}
-    else if(id==='clock-phase') el.textContent='待機中';
-    else if(id==='clock-time')  el.textContent='00:05';
-    else if(id==='zombie-count') el.textContent='🧟 ×1';
-    else if(id==='clock-box')   el.className='grey';
-  });
+  // Destroy Phaser
+  if(game){game.destroy(true);game=null;}
+
+  // Reset virtual input
+  _vjX=0;_vjY=0;_vjActive=false;_vbJump=false;_vbHide=false;_vbShoot=false;
+  _mobMode=false;_mmLevel=null;_camX=0;_camY=0;
+
+  // Reset item HUD
   ['slot-gun','slot-key'].forEach(id=>{
-    const el=document.getElementById(id); if(!el) return;
-    el.classList.add('empty'); el.classList.remove('has-item');
-    const b=el.querySelector('.badge'); if(b) b.remove();
+    const el=document.getElementById(id);if(!el)return;
+    el.classList.add('empty');el.classList.remove('has-item','active-btn');
+    const b=el.querySelector('.badge');if(b)b.remove();
   });
-  // Remove overlay div so it gets recreated fresh (clears pointer-events:auto)
-  const oldOv=document.getElementById('game-overlay');
-  if(oldOv) oldOv.remove();
-  document.querySelectorAll('#game-wrapper > div:not(#iso-shell):not(#item-hud):not(#btn-row):not(#vpad-wrap):not(#vbtn-wrap)').forEach(el=>el.remove());
-  document.getElementById('start-kb-btn').disabled=false;
-  document.getElementById('start-mob-btn').disabled=false;
-  game.destroy(true);
-  setTimeout(()=>{ game=new Phaser.Game(config); },150);
+
+  // Reset HUD text
+  const ov=document.getElementById('game-overlay');if(ov)ov.remove();
+  document.getElementById('hint-text').textContent='';
+  const sm=document.getElementById('status-msg');sm.textContent='等待開始';sm.className='';
+  document.getElementById('clock-box').className='grey';
+  document.getElementById('clock-phase').textContent='待機中';
+  document.getElementById('clock-time').textContent='00:05';
+  document.getElementById('zombie-count').textContent='🧟 ×1';
+
+  // Hide shell, show picker
+  document.getElementById('shell').style.display='none';
+  document.getElementById('mode-picker').style.display='flex';
+  document.body.classList.remove('resA','resB','mob-mode');
+  document.getElementById('btn-resA').classList.remove('sel');
+  document.getElementById('btn-resB').classList.remove('sel');
+  document.getElementById('btn-kb').disabled=true;
+  document.getElementById('btn-mob').disabled=true;
+  _selectedRes=null;
 }
 </script>
 </body>
