@@ -5,7 +5,7 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
   <meta name="color-scheme" content="light"/>
-  <title>通風管逃脫 v4.7</title>
+  <title>通風管逃脫 v4.8</title>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script src="assets_v2.4.js"></script>
   <style>
@@ -20,42 +20,7 @@
       user-select:none;-webkit-user-select:none;
     }
 
-    /* ── Mode picker overlay (shown before any game starts) ── */
-    #mode-picker{
-      position:fixed;inset:0;
-      background:#1a1a2e;
-      display:flex;flex-direction:column;
-      align-items:center;justify-content:center;
-      gap:18px;z-index:999;
-      padding:24px;
-    }
-    #mode-picker h1{color:#50c878;font-size:22px;letter-spacing:.1em;text-align:center;}
-    #mode-picker p{color:#888;font-size:13px;text-align:center;max-width:340px;line-height:1.6;}
-    .picker-section{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%;max-width:380px;}
-    .picker-label{color:#aaa;font-size:11px;letter-spacing:.15em;text-transform:uppercase;}
-    .picker-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
-    .pick-btn{
-      padding:10px 20px;border:none;border-radius:8px;
-      font-family:'Courier New',monospace;font-size:14px;
-      cursor:pointer;color:#fff;
-      box-shadow:0 3px 10px rgba(0,0,0,.4);
-      transition:transform .1s,background .15s;
-      min-width:140px;text-align:center;
-    }
-    .pick-btn:active{transform:scale(.93);}
-    .pick-btn.res  {background:#2471a3;}
-    .pick-btn.res:hover{background:#2e86c1;}
-    .pick-btn.res.sel{background:#1a5276;outline:3px solid #50c878;}
-    .pick-btn.kb   {background:#2471a3;}
-    .pick-btn.kb:hover{background:#2e86c1;}
-    .pick-btn.mob  {background:#27ae60;}
-    .pick-btn.mob:hover{background:#2ecc71;}
-    .pick-btn.go   {background:#8e44ad;font-size:16px;}
-    .pick-btn.go:hover{background:#9b59b6;}
-    .pick-btn.go:disabled{background:#555;cursor:default;}
-    .pick-btn.reset{background:#c0392b;}
-    .pick-btn.reset:hover{background:#e74c3c;}
-    .pick-divider{width:100%;max-width:380px;border:none;border-top:1px solid #333;}
+    /* picker moved to picker.html */
 
     /* ── Outer shell: sized by JS to match chosen resolution ── */
     #shell{
@@ -278,37 +243,8 @@
 </head>
 <body>
 
-<!-- ── Mode picker ── -->
-<div id="mode-picker">
-  <h1>🐱 通風管逃脫</h1>
-  <div style="color:#555;font-size:11px;letter-spacing:.1em;margin-top:-10px;">v4.7</div>
-  <p>找到 🔑 鑰匙 → 抵達 EXIT 出口逃脫<br>躲入櫃子最多 5 秒 · 跳躍可閃過殭屍</p>
-
-  <hr class="pick-divider"/>
-
-  <div class="picker-section">
-    <div class="picker-label">📐 選擇解析度</div>
-    <div class="picker-row">
-      <button class="pick-btn res" id="btn-resA" onclick="selectRes('A')">
-        A — 800×480<br><small style="font-size:11px;opacity:.7">橫式 / iPad橫向</small>
-      </button>
-      <button class="pick-btn res" id="btn-resB" onclick="selectRes('B')">
-        B — 400×800<br><small style="font-size:11px;opacity:.7">直式 / iPhone直立</small>
-      </button>
-    </div>
-  </div>
-
-  <div class="picker-section">
-    <div class="picker-label">🎮 選擇控制方式</div>
-    <div class="picker-row">
-      <button class="pick-btn kb"  onclick="launch('kb')"  id="btn-kb"  disabled>⌨️ 鍵盤開始</button>
-      <button class="pick-btn mob" onclick="launch('mob')" id="btn-mob" disabled>📱 手機開始</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Game shell (hidden until launched) ── -->
-<div id="shell" style="display:none;">
+<!-- ── Game shell ── -->
+<div id="shell">
   <div id="iso-shell"><div id="game-container"></div></div>
   <canvas id="fog-canvas"></canvas>
 
@@ -1028,6 +964,17 @@ let _mobMode=false;
 let _selectedRes=null;
 let game=null;
 
+// Auto-launch from URL params when page loads
+window.addEventListener('DOMContentLoaded',()=>{
+  const p=new URLSearchParams(window.location.search);
+  if(p.has('res')&&p.has('mode')){
+    launch(p.get('mode'), p.get('res'));
+  } else {
+    // No params: redirect to picker
+    window.location.href='picker.html';
+  }
+});
+
 function _initVpad(){
   const old=document.getElementById('vpad-canvas');
   if(!old)return;
@@ -1093,16 +1040,16 @@ function _setupVBtn(id,setOn,setOff){
 }
 
 // ── Mode picker ──────────────────────────────
-function selectRes(res){
-  _selectedRes=res;
-  document.getElementById('btn-resA').classList.toggle('sel',res==='A');
-  document.getElementById('btn-resB').classList.toggle('sel',res==='B');
-  document.getElementById('btn-kb').disabled=false;
-  document.getElementById('btn-mob').disabled=false;
+// Read selection from URL params (set by picker.html)
+function _readParams(){
+  const p=new URLSearchParams(window.location.search);
+  const res=p.get('res')||'A';
+  const inputMode=p.get('mode')||'kb';
+  launch(inputMode,res);
 }
 
-function launch(inputMode){
-  if(!_selectedRes)return;
+function launch(inputMode,resOverride){
+  const _selectedRes=resOverride||(new URLSearchParams(window.location.search).get('res'))||'A';
   LAY=LAYOUTS[_selectedRes];
   VIEW_W=LAY.gameW; VIEW_H=LAY.gameH;
 
@@ -1125,9 +1072,7 @@ function launch(inputMode){
   // Minimap size
   initMinimap();
 
-  // Hide picker, show shell
-  document.getElementById('mode-picker').style.display='none';
-  shell.style.display='block';
+  // Shell is always visible; shell size set below
 
   // Init fog
   initFogCanvases();
@@ -1192,15 +1137,8 @@ function resetGame(){
   document.getElementById('clock-time').textContent='00:05';
   document.getElementById('zombie-count').textContent='🧟 ×1';
 
-  // Hide shell, show picker
-  document.getElementById('shell').style.display='none';
-  document.getElementById('mode-picker').style.display='flex';
-  document.body.classList.remove('resA','resB','mob-mode');
-  document.getElementById('btn-resA').classList.remove('sel');
-  document.getElementById('btn-resB').classList.remove('sel');
-  document.getElementById('btn-kb').disabled=true;
-  document.getElementById('btn-mob').disabled=true;
-  _selectedRes=null;
+  // Return to picker
+  window.location.href='picker.html';
 }
 </script>
 </body>

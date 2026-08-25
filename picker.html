@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+  <meta name="color-scheme" content="light"/>
+  <title>通風管逃脫</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    html,body{
+      min-height:100vh;
+      background:#1a1a2e;
+      display:flex;flex-direction:column;
+      align-items:center;justify-content:center;
+      font-family:'Courier New',monospace;
+      touch-action:manipulation;
+      user-select:none;-webkit-user-select:none;
+    }
+
+    .screen{
+      display:flex;flex-direction:column;
+      align-items:center;gap:20px;
+      padding:28px 24px;
+      width:100%;max-width:420px;
+    }
+
+    /* ── Title ── */
+    .title-wrap{text-align:center;}
+    h1{color:#50c878;font-size:26px;letter-spacing:.12em;}
+    .version{color:#444;font-size:11px;letter-spacing:.12em;margin-top:4px;}
+    .tagline{
+      color:#888;font-size:13px;line-height:1.75;
+      text-align:center;max-width:320px;
+      margin-top:6px;
+    }
+    .tagline b{color:#aaa;}
+
+    hr{width:100%;border:none;border-top:1px solid #2a2a3a;margin:4px 0;}
+
+    /* ── Sections ── */
+    .section{
+      display:flex;flex-direction:column;
+      align-items:center;gap:10px;width:100%;
+    }
+    .section-label{
+      font-size:10px;letter-spacing:.18em;color:#555;
+      text-transform:uppercase;
+    }
+    .btn-row{
+      display:flex;gap:12px;justify-content:center;flex-wrap:wrap;width:100%;
+    }
+
+    /* ── Buttons ── */
+    .pick-btn{
+      padding:11px 18px;border:none;border-radius:10px;
+      font-family:'Courier New',monospace;font-size:13px;
+      cursor:pointer;color:#fff;
+      box-shadow:0 3px 12px rgba(0,0,0,.4);
+      transition:transform .1s,background .12s,outline .1s;
+      min-width:148px;text-align:center;line-height:1.45;
+      border:2px solid transparent;
+    }
+    .pick-btn small{display:block;font-size:10px;opacity:.65;margin-top:2px;}
+    .pick-btn:active{transform:scale(.92);}
+
+    /* resolution */
+    .pick-btn.res{background:#1e3a5f;}
+    .pick-btn.res:hover{background:#2471a3;}
+    .pick-btn.res.sel{
+      background:#1a5276;
+      border-color:#50c878;
+      box-shadow:0 0 0 3px rgba(80,200,120,.25);
+    }
+
+    /* control mode */
+    .pick-btn.kb {background:#1e3a5f;}
+    .pick-btn.kb:hover{background:#2471a3;}
+    .pick-btn.mob{background:#1a4731;}
+    .pick-btn.mob:hover{background:#27ae60;}
+    .pick-btn.kb:disabled,
+    .pick-btn.mob:disabled{
+      background:#222;color:#555;
+      border-color:#333;cursor:default;
+      box-shadow:none;
+    }
+
+    /* ── How to play ── */
+    .how-to{
+      background:#111827;border:1px solid #2a2a3a;border-radius:10px;
+      padding:12px 16px;width:100%;
+      display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;
+    }
+    .how-to-item{
+      font-size:11px;color:#888;line-height:1.5;
+    }
+    .how-to-item span{color:#bbb;}
+  </style>
+</head>
+<body>
+<div class="screen">
+
+  <!-- Title -->
+  <div class="title-wrap">
+    <h1>🐱 通風管逃脫</h1>
+    <div class="version">v4.7</div>
+    <p class="tagline">
+      找到 <b>🔑 鑰匙</b> → 抵達 <b>EXIT</b> 出口逃脫<br>
+      殭屍每分鐘從火車出現，越來越多！
+    </p>
+  </div>
+
+  <!-- How to play -->
+  <div class="how-to">
+    <div class="how-to-item"><span>🗄️ 櫃子</span><br>躲入最多 5 秒</div>
+    <div class="how-to-item"><span>⬆️ 跳躍</span><br>可閃過殭屍</div>
+    <div class="how-to-item"><span>🔫 手槍</span><br>1 發，擊退殭屍</div>
+    <div class="how-to-item"><span>🧟 殭屍</span><br>追捕 15 秒一波</div>
+  </div>
+
+  <hr/>
+
+  <!-- Resolution -->
+  <div class="section">
+    <div class="section-label">📐 解析度</div>
+    <div class="btn-row">
+      <button class="pick-btn res" id="btn-resA" onclick="selectRes('A')">
+        A — 800 × 480
+        <small>橫式 · iPad 橫向</small>
+      </button>
+      <button class="pick-btn res" id="btn-resB" onclick="selectRes('B')">
+        B — 400 × 640
+        <small>直式 · iPhone 直立</small>
+      </button>
+    </div>
+  </div>
+
+  <!-- Control mode -->
+  <div class="section">
+    <div class="section-label">🎮 控制方式</div>
+    <div class="btn-row">
+      <button class="pick-btn kb"  id="btn-kb"  onclick="go('kb')"  disabled>
+        ⌨️ 鍵盤開始
+        <small>WASD · 空白 · F</small>
+      </button>
+      <button class="pick-btn mob" id="btn-mob" onclick="go('mob')" disabled>
+        📱 手機開始
+        <small>虛擬搖桿 + 按鈕</small>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let _res = null;
+
+function selectRes(r){
+  _res = r;
+  document.getElementById('btn-resA').classList.toggle('sel', r==='A');
+  document.getElementById('btn-resB').classList.toggle('sel', r==='B');
+  document.getElementById('btn-kb').disabled  = false;
+  document.getElementById('btn-mob').disabled = false;
+}
+
+function go(mode){
+  if(!_res) return;
+  // Pass selection via URL params to index.html
+  window.location.href = `index.html?res=${_res}&mode=${mode}`;
+}
+</script>
+</body>
+</html>
