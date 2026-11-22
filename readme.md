@@ -12,7 +12,10 @@
 | 檔案 | 說明 |
 |---|---|
 | `index.html` | 標題/選擇畫面（GitHub Pages 入口） |
-| `game.html` | 遊戲主程式（由 index.html 跳轉） |
+| `game.html` | 遊戲頁面骨架（DOM），載入下列檔案（由 index.html 跳轉） |
+| `scene.js` | 場景：地圖生成、戰爭迷霧/視線、玩家、鑰匙/手槍/出口、`GameScene` 核心 |
+| `enemy.js` | 敵人：殭屍、火車、安全/追捕階段、被抓判定、射擊（以 mixin 擴充 `GameScene`） |
+| `ui.js` + `ui.css` | UI：佈局、頂端列、小地圖、道具欄、虛擬搖桿/按鈕、`launch` / `resetGame` |
 | `assets_v2.4.js` | 所有角色/物件貼圖（Canvas 2D 手繪） |
 
 ---
@@ -36,6 +39,10 @@
 ---
 
 ## 改版歷史
+
+### v4.9
+- `game.html` 拆分為 `scene.js`（場景）、`enemy.js`（敵人）、`ui.js` / `ui.css`（UI）
+- 行為不變；載入順序：assets → scene.js → enemy.js → ui.js
 
 ### v4.8 (2025)
 - `picker.html` 改名為 `index.html`（GitHub Pages 入口）
